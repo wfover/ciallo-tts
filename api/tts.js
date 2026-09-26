@@ -1,5 +1,6 @@
 let expiredAt = null;
 let endpoint = null;
+let refreshPromise = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
 export default async function handler(req, res) {
@@ -94,45 +95,62 @@ async function handleTTS(res, text, voiceName, rate, pitch, outputFormat, downlo
 
 function generateSsml(text, voiceName, rate, pitch) {
   return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN"> 
-              <voice name="${voiceName}"> 
+              <voice name="${escapeXml(voiceName)}"> 
                   <mstts:express-as style="general" styledegree="1.0" role="default"> 
-                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> 
+                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${escapeXml(text)}</prosody> 
                   </mstts:express-as> 
               </voice> 
           </speak>`;
 }
 
+// 转义 XML 特殊字符，避免文本中的 & < > 等破坏 SSML
+function escapeXml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]
+  ));
+}
+
 async function refreshEndpoint() {
   if (!expiredAt || Date.now() / 1000 > expiredAt - 60) {
-    try {
-      endpoint = await getEndpoint();
-      
-      // Parse JWT token to get expiry time
-      const parts = endpoint.t.split(".");
-      if (parts.length >= 2) {
-        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(
-          atob(base64)
-            .split('')
-            .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-            .join('')
-        );
-        
-        const decodedJwt = JSON.parse(jsonPayload);
-        expiredAt = decodedJwt.exp;
-      } else {
-        // Default expiry if we can't parse the token
-        expiredAt = (Date.now() / 1000) + 3600;
-      }
-      
-      clientId = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).substring(2, 15);
-      console.log(`获取 Endpoint, 过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
-    } catch (error) {
-      console.error("无法获取或解析Endpoint:", error);
-      throw error;
+    // 并发去重：同一时刻只允许一个请求去刷新 token
+    if (!refreshPromise) {
+      refreshPromise = doRefreshEndpoint().finally(() => {
+        refreshPromise = null;
+      });
     }
+    await refreshPromise;
   } else {
     console.log(`过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
+  }
+}
+
+async function doRefreshEndpoint() {
+  try {
+    endpoint = await getEndpoint();
+
+    // Parse JWT token to get expiry time
+    const parts = endpoint.t.split(".");
+    if (parts.length >= 2) {
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+
+      const decodedJwt = JSON.parse(jsonPayload);
+      expiredAt = decodedJwt.exp;
+    } else {
+      // Default expiry if we can't parse the token
+      expiredAt = (Date.now() / 1000) + 3600;
+    }
+
+    clientId = crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).substring(2, 15);
+    console.log(`获取 Endpoint, 过期时间剩余: ${((expiredAt - Date.now() / 1000) / 60).toFixed(2)} 分钟`);
+  } catch (error) {
+    console.error("无法获取或解析Endpoint:", error);
+    throw error;
   }
 }
 

@@ -1570,3 +1570,233 @@ function deleteCustomApi(apiId) {
         showInfo(`已删除API: ${apiName}`);
     }
 }
+
+// ===== 可搜索的下拉框组件 =====
+// 将原生 select 增强为带搜索框的自定义下拉框：原生 select 隐藏后继续作为
+// 数据源（现有逻辑照常读写），选项变化通过 MutationObserver 自动同步。
+(function() {
+    function escapeHtml(str) {
+        return String(str ?? "").replace(/[&<>"']/g, (c) => (
+            { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]
+        ));
+    }
+
+    function highlight(text, kw) {
+        const safe = escapeHtml(text);
+        if (!kw) return safe;
+        const idx = text.toLowerCase().indexOf(kw.toLowerCase());
+        if (idx === -1) return safe;
+        return escapeHtml(text.slice(0, idx)) +
+            '<mark>' + escapeHtml(text.slice(idx, idx + kw.length)) + '</mark>' +
+            escapeHtml(text.slice(idx + kw.length));
+    }
+
+    function enhanceSelect(select, options) {
+        const $select = $(select);
+        if (!$select.length || $select.data('enhanced')) return;
+        $select.data('enhanced', true);
+        const conf = Object.assign({
+            searchPlaceholder: '搜索...',
+            unit: '项',
+            showSub: true
+        }, options);
+
+        let open = false;
+        let filtered = [];   // 当前渲染的选项 [{value, el}]
+        let activeIndex = -1;
+
+        const $wrap = $('<div class="voice-select">');
+        const $trigger = $(`
+            <button type="button" class="voice-select-trigger form-control" aria-haspopup="listbox" aria-expanded="false">
+                <span class="voice-select-value placeholder"></span>
+                <i class="fas fa-chevron-down voice-select-arrow"></i>
+            </button>`);
+        const $panel = $(`
+            <div class="voice-select-panel">
+                <div class="voice-select-search">
+                    <i class="fas fa-search"></i>
+                    <input type="text" class="voice-select-search-input" placeholder="${escapeHtml(conf.searchPlaceholder)}" autocomplete="off">
+                    <button type="button" class="voice-select-clear" aria-label="清空搜索" style="display:none;"><i class="fas fa-times-circle"></i></button>
+                </div>
+                <div class="voice-select-count"></div>
+                <div class="voice-select-list" role="listbox"></div>
+            </div>`);
+        const $search = $panel.find('.voice-select-search-input');
+        const $count = $panel.find('.voice-select-count');
+        const $list = $panel.find('.voice-select-list');
+        const $value = $trigger.find('.voice-select-value');
+
+        $select.hide().after($wrap);
+        $wrap.append($trigger, $panel, $select);
+
+        function getOptions() {
+            return $select.find('option').map(function() {
+                return { value: this.value, text: this.text };
+            }).get();
+        }
+
+        function updateTriggerLabel() {
+            const selected = $select.find('option:selected');
+            if (selected.length && selected.val() !== '') {
+                $value.removeClass('placeholder').text(selected.text());
+            } else if (selected.length) {
+                $value.addClass('placeholder').text(selected.text() || '请选择');
+            }
+        }
+
+        function renderList(keyword) {
+            const kw = (keyword || '').trim();
+            const opts = getOptions();
+            const placeholders = opts.filter(o => o.value === '');
+            const real = opts.filter(o => o.value !== '');
+
+            $list.empty();
+            filtered = [];
+            activeIndex = -1;
+
+            // 加载中/失败等占位状态
+            if (real.length === 0 && placeholders.length > 0) {
+                $list.append(`<div class="voice-select-empty">${escapeHtml(placeholders[0].text)}</div>`);
+                $count.text('');
+                updateTriggerLabel();
+                return;
+            }
+
+            const matched = kw
+                ? real.filter(o => o.text.toLowerCase().includes(kw.toLowerCase()) || o.value.toLowerCase().includes(kw.toLowerCase()))
+                : real;
+
+            $count.text(kw ? `匹配 ${matched.length} ${conf.unit}` : `共 ${real.length} ${conf.unit}`);
+
+            if (matched.length === 0) {
+                $list.append('<div class="voice-select-empty"><i class="fas fa-search"></i> 未找到匹配项</div>');
+                return;
+            }
+
+            const currentValue = $select.val();
+            matched.forEach(o => {
+                const $opt = $(`
+                    <div class="voice-select-option${o.value === currentValue ? ' selected' : ''}" role="option" data-value="${escapeHtml(o.value)}">
+                        <div class="voice-option-main">
+                            <span class="voice-option-name">${highlight(o.text, kw)}</span>
+                            <i class="fas fa-check voice-option-check"></i>
+                        </div>
+                        ${conf.showSub && o.value !== o.text ? `<span class="voice-option-sub">${highlight(o.value, kw)}</span>` : ''}
+                    </div>
+                `);
+                $list.append($opt);
+                filtered.push({ value: o.value, el: $opt });
+            });
+
+            // 已选中项滚动到可视区域
+            const $selected = $list.find('.voice-select-option.selected');
+            if ($selected.length) {
+                const listEl = $list[0];
+                listEl.scrollTop = $selected[0].offsetTop - listEl.offsetTop - listEl.clientHeight / 2;
+            }
+        }
+
+        function setActive(index) {
+            if (!filtered.length) return;
+            activeIndex = (index + filtered.length) % filtered.length;
+            filtered.forEach((item, i) => item.el.toggleClass('active', i === activeIndex));
+            filtered[activeIndex].el[0].scrollIntoView({ block: 'nearest' });
+        }
+
+        function selectValue(value) {
+            if ($select.val() !== value) {
+                const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+                setter.call($select[0], value);
+                $select[0].dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            updateTriggerLabel();
+            closePanel();
+        }
+
+        function closePanel() {
+            if (!open) return;
+            open = false;
+            $wrap.removeClass('open');
+            $trigger.attr('aria-expanded', 'false');
+            $search.val('');
+            $panel.find('.voice-select-clear').hide();
+        }
+
+        function openPanel() {
+            if (open) return;
+            // 关闭页面上其他已展开的下拉框
+            $('.voice-select.open').each(function() {
+                const close = $(this).data('closePanel');
+                if (close) close();
+            });
+            open = true;
+            $wrap.addClass('open');
+            $trigger.attr('aria-expanded', 'true');
+            $search.val('');
+            renderList('');
+            $search.focus();
+        }
+
+        $wrap.data('closePanel', closePanel);
+
+        $trigger.on('click', function(e) {
+            e.stopPropagation();
+            open ? closePanel() : openPanel();
+        });
+
+        $panel.on('click', function(e) {
+            e.stopPropagation();
+        });
+
+        $search.on('input', function() {
+            const kw = $(this).val();
+            $panel.find('.voice-select-clear').toggle(kw.length > 0);
+            renderList(kw);
+        }).on('keydown', function(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActive(activeIndex + 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActive(activeIndex - 1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (activeIndex >= 0 && filtered[activeIndex]) {
+                    selectValue(filtered[activeIndex].value);
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePanel();
+            }
+        });
+
+        $panel.find('.voice-select-clear').on('click', function() {
+            $search.val('').trigger('input').focus();
+        });
+
+        // 点击选项选择（事件委托，列表会重建）
+        $list.on('click', '.voice-select-option', function() {
+            selectValue($(this).data('value'));
+        });
+
+        // 点击组件外关闭
+        $(document).on('click', closePanel);
+
+        // 原生 select 选项变化时自动同步（加载中/切换API/获取自定义讲述人等场景）
+        const observer = new MutationObserver(() => {
+            updateTriggerLabel();
+            if (open) renderList($search.val());
+        });
+        observer.observe($select[0], { childList: true, characterData: true, subtree: true });
+
+        updateTriggerLabel();
+    }
+
+    $(function() {
+        enhanceSelect($('#speaker')[0], { searchPlaceholder: '搜索讲述人（名称或ID）...', unit: '位讲述人' });
+        enhanceSelect($('#api')[0], { searchPlaceholder: '搜索API...', unit: '个API', showSub: false });
+        enhanceSelect($('#audioFormat')[0], { searchPlaceholder: '搜索格式...', unit: '种格式', showSub: false });
+        // API 管理弹窗里的“API格式”
+        enhanceSelect($('#apiFormat')[0], { searchPlaceholder: '搜索格式...', unit: '种格式', showSub: false });
+    });
+})();

@@ -126,6 +126,10 @@ function serveStatic(req, res, url) {
       "Content-Length": stat.size,
       "Cache-Control": "public, max-age=3600",
     });
+    if (req.method === "HEAD") {
+      res.end();
+      return;
+    }
     fs.createReadStream(filePath).pipe(res);
   });
 }
