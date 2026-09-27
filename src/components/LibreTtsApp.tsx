@@ -297,15 +297,9 @@ function LibreTtsAppInner() {
           // 试听前 20 个字
           const previewText = rawText.substring(0, 20);
           const blob = await requestSegment(previewText, true);
-          const audio = audioRef.current;
-          if (audio) {
-            const url = URL.createObjectURL(blob);
-            cachedAudio.current.set(url, blob);
-            audio.src = url;
-            audio.play().catch(() => {});
-            audio.onended = () => setPlayingId(null);
-            setResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
-          }
+          const url = URL.createObjectURL(blob);
+          cachedAudio.current.set(url, blob);
+          setResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
           return;
         }
 
@@ -377,13 +371,8 @@ function LibreTtsAppInner() {
           const finalBlob = results.length > 1 ? new Blob(results, { type: "audio/mpeg" }) : results[0];
           const url = URL.createObjectURL(finalBlob);
           cachedAudio.current.set(url, finalBlob);
+          // 音频元素通过 result 状态渲染（src + autoPlay），无需直接操作 DOM
           setResult({ url, filename: `voice.${audioExtension(api, audioFormat)}` });
-          const audio = audioRef.current;
-          if (audio) {
-            audio.src = url;
-            audio.play().catch(() => {});
-            audio.onended = () => setPlayingId(null);
-          }
         }
       } catch (err) {
         show(err instanceof Error ? err.message : "生成失败", "danger");
@@ -671,7 +660,7 @@ function LibreTtsAppInner() {
 
             {result && (
               <div className="mt-4">
-                <audio ref={audioRef} controls className="mt-2 w-full rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.05)]" src={result.url} />
+                <audio ref={audioRef} controls autoPlay className="mt-2 w-full rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.05)]" src={result.url} />
                 <a
                   href={result.url}
                   download={result.filename}
