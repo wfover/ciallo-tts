@@ -7,7 +7,7 @@ import SearchableSelect, { type SelectOption } from "./SearchableSelect";
 import HistoryCard from "./HistoryCard";
 import ApiManagerModal from "./ApiManagerModal";
 import PasswordGate from "./PasswordGate";
-import { ToastProvider, useToast, LOADING_STYLE } from "./ToastProvider";
+import { ToastProvider, useToast } from "./ToastProvider";
 import { getApiLimits, getTextLength, splitText } from "@/lib/segmentation";
 import { audioExtension, makeTtsRequest, type ApiContext } from "@/lib/ttsRequest";
 import {
@@ -48,7 +48,7 @@ interface SpeakerState {
 }
 
 function LibreTtsAppInner() {
-  const { show } = useToast();
+  const { show, progress, showProgress, hideProgress } = useToast();
 
   const [builtinSpeakers, setBuiltinSpeakers] = useState<Record<string, { speakers: SpeakerMap }>>({});
   const [customApis, setCustomApis] = useState<CustomApiMap>({});
@@ -64,7 +64,6 @@ function LibreTtsAppInner() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [result, setResult] = useState<{ url: string; filename: string } | null>(null);
-  const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null);
   const [apiManagerOpen, setApiManagerOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -311,9 +310,9 @@ function LibreTtsAppInner() {
         const results: Blob[] = [];
 
         if (segments.length > 1) {
-          setProgress({ message: `正在生成#${requestId}请求的分段语音`, percent: 0 });
+          showProgress(`正在生成#${requestId}请求的分段语音`, 0);
         } else {
-          setProgress({ message: "正在生成语音，请稍候...", percent: -1 });
+          showProgress("正在生成语音，请稍候...");
         }
 
         for (let i = 0; i < segments.length; i++) {
@@ -325,12 +324,12 @@ function LibreTtsAppInner() {
           for (let retryCount = 0; retryCount < MAX_RETRIES; retryCount++) {
             try {
               if (segments.length > 1) {
-                setProgress({
-                  message: `正在生成#${requestId}请求的 ${i + 1}/${segments.length} 段语音${
+                showProgress(
+                  `正在生成#${requestId}请求的 ${i + 1}/${segments.length} 段语音${
                     retryCount > 0 ? `(重试 ${retryCount + 1}/${MAX_RETRIES - 1})` : ""
                   }`,
-                  percent: Math.round(((i + retryCount / MAX_RETRIES) / segments.length) * 100),
-                });
+                  Math.round(((i + retryCount / MAX_RETRIES) / segments.length) * 100)
+                );
               }
               blob = await requestSegment(segment, false);
               break;
@@ -378,7 +377,7 @@ function LibreTtsAppInner() {
         show(err instanceof Error ? err.message : "生成失败", "danger");
       } finally {
         setGenerating(false);
-        setProgress(null);
+        hideProgress();
       }
     },
     [currentApi, text, speakerId, speakerState, rate, pitch, instructions, audioFormat, limits.maxSegment, show, addHistoryItem]
@@ -640,23 +639,6 @@ function LibreTtsAppInner() {
               {isGeneratingActive && <LoaderCircle size={16} className="animate-spin" />}
               生成语音
             </button>
-
-            {progress && (
-              <div className="mt-4 text-center">
-                <div className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-white ${LOADING_STYLE}`}>
-                  <LoaderCircle size={14} className="animate-spin" />
-                  {progress.message}
-                </div>
-                {progress.percent >= 0 && (
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      className="h-full rounded-full bg-[#007bff] transition-all duration-300"
-                      style={{ width: `${progress.percent}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
 
             {result && (
               <div className="mt-4">
