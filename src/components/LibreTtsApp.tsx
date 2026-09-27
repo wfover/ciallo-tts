@@ -481,7 +481,7 @@ function LibreTtsAppInner() {
       <div className="grid w-full grid-cols-1 items-start gap-4 px-4 md:grid-cols-2 md:px-8">
         {/* 表单卡片 */}
         <div className="h-full overflow-hidden rounded-[15px] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_6px_25px_rgba(99,102,241,0.08)]">
-          <div className="relative overflow-hidden rounded-t-[15px] bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff] px-4 py-6">
+          <div className="relative overflow-hidden rounded-t-[15px] bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff] px-4 py-4">
             <h2 className="relative m-0 text-center text-2xl font-medium text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.1)]">
               文本转语音
             </h2>
