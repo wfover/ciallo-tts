@@ -54,17 +54,41 @@ const PUNCTUATION_GROUPS: string[][] = [
   [" ", "\t", "　", "〿", "〮", "〯", "᠀", "᭟", "᭠", "᳓", "᳔", "᳕"],
 ];
 
+const BREAK_TAG_RE = /<break\s+time=["']\d+(?:\.\d+)?[ms]s?["']\s*\/>/g;
+
+/** 标记出文本中每个 <break/> 标签的 [start, end) 区间，分段时作为原子单元处理 */
+function findTagRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const m of text.matchAll(BREAK_TAG_RE)) {
+    ranges.push([m.index!, m.index! + m[0].length]);
+  }
+  return ranges;
+}
+
+function inTagRange(pos: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([s, e]) => pos > s && pos < e);
+}
+
 /** 按标点优先级将长文本分段，每段不超过 maxSegment 单位 */
 export function splitText(text: string, maxSegment: number): string[] {
   const segments: string[] = [];
   let remainingText = text.trim();
 
   while (remainingText.length > 0) {
+    const tagRanges = findTagRanges(remainingText);
     let splitIndex = remainingText.length;
     let currentLength = 0;
     let bestSplitIndex = -1;
 
     for (let i = 0; i < remainingText.length; i++) {
+      // <break/> 标签整体作为原子单元，不能从中间截断
+      const tag = tagRanges.find(([s]) => s === i);
+      if (tag) {
+        currentLength += tag[1] - tag[0];
+        i = tag[1] - 1; // for 循环 i++ 后跳到标签末尾
+        continue;
+      }
+
       currentLength += remainingText.charCodeAt(i) > 127 ? 2 : 1;
 
       if (currentLength > maxSegment) {
@@ -72,11 +96,11 @@ export function splitText(text: string, maxSegment: number): string[] {
         // 先遍历优先级组
         for (let priority = 0; priority < PUNCTUATION_GROUPS.length; priority++) {
           let searchLength = 0;
-          // 在300单位范围内搜索当前优先级的标点
+          // 在300单位范围内搜索当前优先级的标点（跳过标签内部，避免切进标签）
           for (let j = i; j >= 0 && searchLength <= 300; j--) {
             searchLength += remainingText.charCodeAt(j) > 127 ? 2 : 1;
 
-            if (PUNCTUATION_GROUPS[priority].includes(remainingText[j])) {
+            if (!inTagRange(j, tagRanges) && PUNCTUATION_GROUPS[priority].includes(remainingText[j])) {
               bestSplitIndex = j;
               break;
             }

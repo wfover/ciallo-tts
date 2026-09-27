@@ -11,12 +11,14 @@ let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 export function formatToExtension(format: string): string {
   const f = format.toLowerCase();
   if (f.includes("mp3")) return "mp3";
+  // 容器格式需在编码格式之前判断：如 ogg-24khz-16bit-mono-opus 应返回 .ogg
+  if (f.includes("ogg")) return "ogg";
+  if (f.includes("webm")) return "webm";
   if (f.includes("opus")) return "opus";
   if (f.includes("flac")) return "flac";
   if (f.includes("wav") || f.includes("riff")) return "wav";
   if (f.includes("truesilk")) return "silk";
   if (f.includes("amr-wb")) return "amr";
-  if (f.includes("ogg")) return "ogg";
   if (f.includes("webm")) return "webm";
   if (f.includes("pcm") || f.includes("raw")) return "pcm";
   return "mp3";

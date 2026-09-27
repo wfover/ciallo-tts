@@ -53,6 +53,9 @@ async function handleTTS(
   outputFormat: string,
   download: boolean
 ): Promise<Response> {
+  if (!text.trim()) {
+    return errorResponse("文本不能为空", 400);
+  }
   try {
     const audio = await synthesize(text, voiceName, rate, pitch, outputFormat);
 

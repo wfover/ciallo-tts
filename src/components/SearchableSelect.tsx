@@ -188,53 +188,55 @@ export default function SearchableSelect({
           {keyword ? `匹配 ${matched.length} ${unit}` : `共 ${options.length} ${unit}`}
         </div>
 
-        <div ref={listRef} className="voice-list mt-1 max-h-[260px] overflow-y-auto p-1.5">
-          {options.length === 0 && emptyText ? (
-            <div className="px-4 py-5 text-center text-sm text-slate-faint">{emptyText}</div>
-          ) : matched.length === 0 ? (
-            <div className="flex items-center justify-center gap-1.5 px-4 py-5 text-center text-sm text-slate-faint">
-              <Search size={13} /> 未找到匹配项
-            </div>
-          ) : (
-            matched.map((o, i) => {
-              const isSelected = o.value === value;
-              const isActive = i === activeIndex;
-              return (
-                <div
-                  key={o.value}
-                  role="option"
-                  aria-selected={isSelected}
-                  data-instance={instanceId}
-                  onClick={() => select(o.value)}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  className={`voice-option cursor-pointer rounded-lg px-2.5 py-2 transition-colors duration-150 ${
-                    isSelected
-                      ? "voice-option-selected bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff]"
-                      : isActive
-                        ? "bg-primary-soft"
-                        : ""
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`truncate text-[0.95rem] ${isSelected ? "text-white" : "text-slate-800"}`}
-                    >
-                      {highlight(o.label, keyword.trim())}
-                    </span>
-                    {isSelected && <Check size={13} className="shrink-0 text-white" />}
+        {open && (
+          <div ref={listRef} className="voice-list mt-1 max-h-[260px] overflow-y-auto p-1.5">
+            {options.length === 0 && emptyText ? (
+              <div className="px-4 py-5 text-center text-sm text-slate-faint">{emptyText}</div>
+            ) : matched.length === 0 ? (
+              <div className="flex items-center justify-center gap-1.5 px-4 py-5 text-center text-sm text-slate-faint">
+                <Search size={13} /> 未找到匹配项
+              </div>
+            ) : (
+              matched.map((o, i) => {
+                const isSelected = o.value === value;
+                const isActive = i === activeIndex;
+                return (
+                  <div
+                    key={o.value}
+                    role="option"
+                    aria-selected={isSelected}
+                    data-instance={instanceId}
+                    onClick={() => select(o.value)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    className={`voice-option cursor-pointer rounded-lg px-2.5 py-2 transition-colors duration-150 ${
+                      isSelected
+                        ? "voice-option-selected bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff]"
+                        : isActive
+                          ? "bg-primary-soft"
+                          : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`truncate text-[0.95rem] ${isSelected ? "text-white" : "text-slate-800"}`}
+                      >
+                        {highlight(o.label, keyword.trim())}
+                      </span>
+                      {isSelected && <Check size={13} className="shrink-0 text-white" />}
+                    </div>
+                    {showSub && o.value !== o.label && (
+                      <span
+                        className={`block truncate text-xs ${isSelected ? "text-white/85" : "text-slate-faint"}`}
+                      >
+                        {highlight(o.value, keyword.trim())}
+                      </span>
+                    )}
                   </div>
-                  {showSub && o.value !== o.label && (
-                    <span
-                      className={`block truncate text-xs ${isSelected ? "text-white/85" : "text-slate-faint"}`}
-                    >
-                      {highlight(o.value, keyword.trim())}
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

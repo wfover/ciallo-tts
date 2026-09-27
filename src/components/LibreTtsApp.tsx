@@ -327,7 +327,7 @@ function LibreTtsAppInner() {
               if (segments.length > 1) {
                 setProgress({
                   message: `正在生成#${requestId}请求的 ${i + 1}/${segments.length} 段语音${
-                    retryCount > 0 ? `(重试 ${retryCount}/${MAX_RETRIES - 1})` : ""
+                    retryCount > 0 ? `(重试 ${retryCount + 1}/${MAX_RETRIES - 1})` : ""
                   }`,
                   percent: Math.round(((i + retryCount / MAX_RETRIES) / segments.length) * 100),
                 });

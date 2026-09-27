@@ -1,0 +1,124 @@
+// 纯函数单元测试：node --test tests/
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { getApiLimits, getTextLength, splitText, escapeXml } from "../src/lib/segmentation.ts";
+import { formatToExtension, escapeXml as serverEscapeXml, generateSsml } from "../src/lib/edgeTts.ts";
+
+// ---------- getTextLength ----------
+test("getTextLength: 中文按2单位计算", () => {
+  assert.equal(getTextLength("你好"), 4);
+});
+
+test("getTextLength: 英文按1单位计算", () => {
+  assert.equal(getTextLength("hello"), 5);
+});
+
+test("getTextLength: 混合文本", () => {
+  assert.equal(getTextLength("你好world"), 9);
+});
+
+test("getTextLength: 停顿标签按1秒=11单位", () => {
+  assert.equal(getTextLength('<break time="1s"/>'), 11);
+  assert.equal(getTextLength('<break time="0.5s"/>'), Math.round(0.5 * 11));
+  assert.equal(getTextLength('<break time="500ms"/>'), Math.round(0.5 * 11));
+});
+
+test("getTextLength: 停顿标签外的文本正常计算", () => {
+  assert.equal(getTextLength('你<break time="1s"/>好'), 4 + 11);
+});
+
+// ---------- splitText ----------
+test("splitText: 短文本不分段", () => {
+  assert.deepEqual(splitText("你好世界", 100), ["你好世界"]);
+});
+
+test("splitText: 按句末标点分段", () => {
+  const text = "第一句话。第二句话。第三句话！第四句话？";
+  const segments = splitText(text, 12);
+  assert.ok(segments.length > 1);
+  // 所有段拼起来应等于原文（忽略 trim）
+  assert.equal(segments.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+  segments.forEach((s) => assert.ok(getTextLength(s) <= 12, `段超限: ${JSON.stringify(s)}`));
+});
+
+test("splitText: 无标点长文本硬切", () => {
+  const text = "a".repeat(30);
+  const segments = splitText(text, 10);
+  assert.equal(segments.length, 3);
+  assert.equal(segments.join(""), text);
+});
+
+test("splitText: 中文长文本在标点附近分段", () => {
+  const text = "这是第一句，这是第二句，这是第三句，这是第四句。";
+  const segments = splitText(text, 14);
+  assert.ok(segments.length >= 2);
+  segments.forEach((s) => assert.ok(getTextLength(s) <= 14, `段超限: ${JSON.stringify(s)}`));
+});
+
+test("splitText: 保留停顿标签不被截断在标签内部", () => {
+  const text = "你好<break time=\"1s\"/>世界".repeat(5);
+  const segments = splitText(text, 20);
+  // 每段不应包含残缺的标签
+  segments.forEach((s) => {
+    const opens = (s.match(/<break/g) || []).length;
+    const closes = (s.match(/\/>/g) || []).length;
+    assert.equal(opens, closes, `标签被截断: ${JSON.stringify(s)}`);
+  });
+});
+
+test("splitText: 空文本返回空数组", () => {
+  assert.deepEqual(splitText("", 100), []);
+  assert.deepEqual(splitText("   ", 100), []);
+});
+
+// ---------- escapeXml ----------
+test("escapeXml: 转义全部特殊字符", () => {
+  assert.equal(escapeXml(`<a href="x">&'`), "&lt;a href=&quot;x&quot;&gt;&amp;&apos;");
+});
+
+test("escapeXml: 空值安全", () => {
+  assert.equal(escapeXml(null), "");
+  assert.equal(escapeXml(undefined), "");
+});
+
+test("escapeXml: 服务端版本与客户端一致", () => {
+  const sample = `<text>&"'你好`;
+  assert.equal(serverEscapeXml(sample), escapeXml(sample));
+});
+
+// ---------- generateSsml ----------
+test("generateSsml: 转义用户文本防注入", () => {
+  const ssml = generateSsml(`你好&<break/>`, "zh-CN-XiaoxiaoNeural", 0, 0);
+  assert.ok(!ssml.includes("你好&<break/>"));
+  assert.ok(ssml.includes("你好&amp;&lt;break/&gt;"));
+  assert.ok(ssml.includes('<voice name="zh-CN-XiaoxiaoNeural">'));
+});
+
+// ---------- formatToExtension ----------
+test("formatToExtension: 常见格式映射", () => {
+  assert.equal(formatToExtension("audio-24khz-48kbitrate-mono-mp3"), "mp3");
+  assert.equal(formatToExtension("riff-24khz-16bit-mono-pcm"), "wav");
+  assert.equal(formatToExtension("audio-24khz-48khz-16bit-24kbps-opus"), "opus");
+  assert.equal(formatToExtension("ogg-24khz-16bit-mono-opus"), "ogg");
+  assert.equal(formatToExtension("webm-24khz-16bit-mono-opus"), "webm");
+  assert.equal(formatToExtension("raw-16khz-16bit-mono-pcm"), "pcm");
+  assert.equal(formatToExtension("unknown-format"), "mp3");
+});
+
+// ---------- getApiLimits ----------
+test("getApiLimits: openai 限制更严格", () => {
+  const oai = getApiLimits("openai");
+  const edge = getApiLimits("edge");
+  assert.ok(oai.maxSegment < edge.maxSegment);
+  assert.ok(oai.maxTotal < edge.maxTotal);
+  assert.deepEqual(oai, { maxSegment: 400, maxTotal: 2000 });
+  assert.deepEqual(edge, { maxSegment: 5000, maxTotal: 100000 });
+});
+
+// ---------- 长文本完整性 ----------
+test("splitText: 1000字长文本分段后内容完整", () => {
+  const text = Array.from({ length: 100 }, (_, i) => `这是第${i}句测试内容。`).join("");
+  const segments = splitText(text, 5000);
+  assert.equal(segments.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+  segments.forEach((s) => assert.ok(getTextLength(s) <= 5000));
+});
