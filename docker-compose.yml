@@ -1,7 +1,7 @@
 services:
   libretts:
-    # 优先拉取 GHCR 镜像；本地修改过代码时可用 `docker compose build` 构建本地版本
-    image: ghcr.io/bestzwei/libretts:latest
+    # 官方镜像；本地修改过代码时可用 `docker compose build` 构建本地版本
+    image: ghcr.io/librespark/libretts:latest
     build: .
     container_name: libretts
     ports:

@@ -129,27 +129,57 @@ LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
 
 ### 服务器部署（Docker）
 
-镜像已发布到 GitHub Container Registry，支持 amd64 / arm64：
+官方镜像已发布到 GitHub Container Registry，同时支持 amd64 / arm64 架构：
+
+| 镜像 | 说明 |
+| --- | --- |
+| `ghcr.io/librespark/libretts` | 上游官方镜像 |
+| `ghcr.io/bestzwei/libretts` | 本仓库镜像（内容相同） |
+
+可用标签：`latest`（main 分支最新构建）、`v1.0.1`（版本标签）、`1.0`（主次版本）、git 提交哈希。镜像在每次推送到 `main` 分支或发布 `v*` 标签时由 GitHub Actions 自动构建。
+
+#### 方式一：docker run
 
 ```bash
-# 可选：启用访问密码
-echo "PASSWORD=你的密码" > .env
-
-# 直接使用现成镜像
-docker run -d -p 3000:3000 -e PASSWORD=你的密码 --restart unless-stopped --name libretts ghcr.io/bestzwei/libretts:latest
+docker run -d   -p 3000:3000   -e PASSWORD=你的密码   --restart unless-stopped   --name libretts   ghcr.io/librespark/libretts:latest
 ```
 
-或使用 Docker Compose（自动拉取镜像；本地修改过代码时 `docker compose build` 可构建本地版本）：
+`PASSWORD` 可省略（不启用访问密码）；修改 `-p` 前面的端口可更换服务端口。
+
+#### 方式二：Docker Compose
+
+新建 `docker-compose.yml`（无需 clone 仓库）：
+
+```yaml
+services:
+  libretts:
+    image: ghcr.io/librespark/libretts:latest
+    container_name: libretts
+    ports:
+      - "3000:3000"
+    environment:
+      # 设置访问密码；留空则不启用验证
+      - PASSWORD=${PASSWORD:-}
+    restart: unless-stopped
+```
+
+启动：
 
 ```bash
-git clone https://github.com/LibreSpark/LibreTTS.git
-cd LibreTTS
 docker compose up -d
 ```
 
-镜像在每次推送到 `main` 分支或发布 `v*` 标签时由 GitHub Actions 自动构建更新。
+常用命令：
 
-服务将运行在 `http://服务器IP:3000`，可用 `-p` 修改映射端口（在 `docker-compose.yml` 中）。
+```bash
+docker compose logs -f        # 查看日志
+docker compose pull && docker compose up -d   # 更新到最新镜像
+docker compose down           # 停止并移除容器
+```
+
+如果 clone 了本仓库，`docker-compose.yml` 已内置（含 `build: .`），本地修改过代码时可用 `docker compose build` 构建自己的版本。
+
+服务将运行在 `http://服务器IP:3000`。
 
 ### 服务器部署（Node.js）
 
