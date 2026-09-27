@@ -112,26 +112,27 @@ LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
 
 ### 服务器部署（Docker）
 
-适合部署在自己的 VPS / 家用服务器上：
+镜像已发布到 GitHub Container Registry，支持 amd64 / arm64：
+
+```bash
+# 可选：启用访问密码
+echo "PASSWORD=你的密码" > .env
+
+# 直接使用现成镜像
+docker run -d -p 3000:3000 -e PASSWORD=你的密码 --restart unless-stopped --name libretts ghcr.io/bestzwei/libretts:latest
+```
+
+或使用 Docker Compose（自动拉取镜像；本地修改过代码时 `docker compose build` 可构建本地版本）：
 
 ```bash
 git clone https://github.com/LibreSpark/LibreTTS.git
 cd LibreTTS
-
-# 可选：启用访问密码
-echo "PASSWORD=你的密码" > .env
-
 docker compose up -d
 ```
 
+镜像在每次推送到 `main` 分支或发布 `v*` 标签时由 GitHub Actions 自动构建更新。
+
 服务将运行在 `http://服务器IP:3000`，可用 `-p` 修改映射端口（在 `docker-compose.yml` 中）。
-
-不想用 Docker Compose 也可以直接：
-
-```bash
-docker build -t libretts .
-docker run -d -p 3000:3000 -e PASSWORD=你的密码 --restart unless-stopped --name libretts libretts
-```
 
 ### 服务器部署（Node.js）
 
