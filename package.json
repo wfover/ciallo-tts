@@ -1,6 +1,6 @@
 {
   "name": "libretts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "LibreTTS - 免费在线文本转语音工具",
   "scripts": {
