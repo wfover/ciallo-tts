@@ -466,7 +466,7 @@ function LibreTtsAppInner() {
 
   return (
     <div className="mx-auto mt-8 flex min-h-[90vh] w-full flex-col items-center justify-center">
-      <div className="grid w-full grid-cols-1 items-start gap-4 px-4 md:grid-cols-2 md:px-8">
+      <div className="grid w-full grid-cols-1 items-start gap-4 px-6 md:grid-cols-2 md:px-20">
         {/* 表单卡片 */}
         <div className="h-full overflow-hidden rounded-[15px] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_6px_25px_rgba(99,102,241,0.08)]">
           <div className="relative overflow-hidden rounded-t-[15px] bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff] px-4 py-4">
