@@ -14,7 +14,8 @@ LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选�
 - 📱 响应式设计，支持移动端
 - 💾 支持音频下载
 - 📝 历史记录功能（最多保存50条）
-- 🔌 支持添加自定义OpenAI格式的TTS API
+- 🔌 支持添加自定义 TTS API（OpenAI / Edge 两种格式，可导入导出配置）
+- 🔐 可选访问密码保护（设置 `PASSWORD` 环境变量）
 
 ## 本地开发
 
@@ -28,6 +29,22 @@ npm run dev        # 开发模式，默认 http://localhost:3000
 ```bash
 npm run build      # 生产构建
 npm start          # 运行生产版本
+```
+
+### 项目结构
+
+```
+├── src/
+│   ├── app/                  # Next.js App Router
+│   │   ├── api/              # Route Handlers：tts / voices / check-password / verify-password
+│   │   ├── layout.tsx        # SEO metadata、JSON-LD、统计脚本
+│   │   └── page.tsx
+│   ├── components/           # React 组件（表单、历史记录、API管理弹窗、搜索下拉框等）
+│   ├── lib/                  # 核心逻辑（Edge TTS 签名、文本分段、请求构造、自定义API存储）
+│   └── hooks/                # React hooks
+├── public/                   # 静态资源（speakers.json、图标）
+├── Dockerfile                # 多阶段构建（standalone 输出）
+└── .github/workflows/        # Docker 镜像自动发布到 GHCR
 ```
 
 ## API 说明
@@ -193,6 +210,20 @@ server {
 
 ## 环境变量
 
-设置环境变量 `PASSWORD` 可开启访问密码验证。如果 `PASSWORD` 非空，则用户第一次访问页面时会显示密码输入界面，输入正确后在该设备上后续访问将不再需要验证。
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `PASSWORD` | 访问密码，非空时开启验证 | 空（不验证） |
+| `PORT` | 服务监听端口 | `3000` |
+| `HOSTNAME` | 服务监听地址 | `0.0.0.0` |
+
+设置 `PASSWORD` 后，用户第一次访问页面时会显示密码输入界面，输入正确后在该设备上后续访问将不再需要验证。
+
+### 关于 Cloudflare 部署
+
+旧版本曾支持 Cloudflare Pages，Next.js 重构后暂不直接支持。项目 API 层仅使用 Web 标准 API，如需部署到 Cloudflare Workers 可基于 [OpenNext Cloudflare 适配器](https://opennext.js.org/cloudflare) 自行配置。
+
+## 许可证
+
+[MIT](LICENSE)
 
 [![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
