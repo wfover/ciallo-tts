@@ -10,9 +10,17 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# 同一 ref 只保留最新一次运行，避免并发构建互相争抢 GHA 缓存锁
+# （之前 main 与 tag 同时触发两个构建，双方卡在 Build and push 数小时）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # GitHub 默认 job 超时是 360 分钟，卡住时会白跑 6 小时；这里收紧到 60 分钟快速失败
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -42,7 +50,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long,prefix=
+            type=sha,format=long,prefix=,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -52,5 +60,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 按 ref 隔离缓存 scope：main 与 tag 两次构建不再争抢同一个 GHA 缓存锁，
+          # 同时切换到新的 scope 名，避开此前卡死的那份缓存
+          cache-from: type=gha,scope=${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
