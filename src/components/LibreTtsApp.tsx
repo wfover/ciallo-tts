@@ -713,7 +713,7 @@ export default function LibreTtsApp() {
     <ToastProvider>
       <PasswordGate>
         <LibreTtsAppInner />
-        <footer className="mt-4 py-4 text-center text-[0.9rem] text-slate-muted">
+        <footer className="mt-2 py-2 text-center text-[0.9rem] text-slate-muted">
           <p className="mb-1">
             <a href="https://zwei.de.eu.org" target="_blank" rel="noreferrer" className="transition-colors hover:text-slate-700">
               Zwei
