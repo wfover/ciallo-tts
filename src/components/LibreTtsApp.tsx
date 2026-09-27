@@ -70,7 +70,7 @@ function LibreTtsAppInner() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const requestCounter = useRef(0);
-  const isGenerating = useRef(false);
+  const [generating, setGenerating] = useState(false);
   const cachedAudio = useRef(new Map<string, Blob>());
 
   const currentApi = useMemo(() => {
@@ -266,7 +266,7 @@ function LibreTtsAppInner() {
         show("请输入要转换的文本", "warning");
         return;
       }
-      if (!isPreview && isGenerating.current) {
+      if (!isPreview && generating) {
         show("请等待当前语音生成完成", "warning");
         return;
       }
@@ -278,6 +278,7 @@ function LibreTtsAppInner() {
       const api = currentApi;
       const voice = speakerId;
       const speakerName = speakerState.map[speakerId] || speakerId;
+      setGenerating(true);
 
       async function requestSegment(segmentText: string, segmentPreview: boolean): Promise<Blob> {
         return makeTtsRequest(api, {
@@ -308,7 +309,7 @@ function LibreTtsAppInner() {
           return;
         }
 
-        isGenerating.current = true;
+        setGenerating(true);
         requestCounter.current += 1;
         const requestId = requestCounter.current;
 
@@ -317,6 +318,8 @@ function LibreTtsAppInner() {
 
         if (segments.length > 1) {
           setProgress({ message: `正在生成#${requestId}请求的分段语音`, percent: 0 });
+        } else {
+          setProgress({ message: "正在生成语音，请稍候...", percent: -1 });
         }
 
         for (let i = 0; i < segments.length; i++) {
@@ -385,7 +388,7 @@ function LibreTtsAppInner() {
       } catch (err) {
         show(err instanceof Error ? err.message : "生成失败", "danger");
       } finally {
-        isGenerating.current = false;
+        setGenerating(false);
         setProgress(null);
       }
     },
@@ -471,7 +474,7 @@ function LibreTtsAppInner() {
     show(`已导入 ${apis.length} 个自定义API`, "success");
   }
 
-  const isGeneratingActive = progress !== null;
+  const isGeneratingActive = generating;
 
   return (
     <div className="mx-auto mt-8 flex min-h-[90vh] w-full flex-col items-center justify-center">
@@ -499,7 +502,6 @@ function LibreTtsAppInner() {
                     }}
                     searchPlaceholder="搜索API..."
                     unit="个API"
-                    joined
                   />
                   <button
                     type="button"
@@ -656,12 +658,14 @@ function LibreTtsAppInner() {
                   <LoaderCircle size={14} className="animate-spin" />
                   {progress.message}
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full rounded-full bg-[#007bff] transition-all duration-300"
-                    style={{ width: `${progress.percent}%` }}
-                  />
-                </div>
+                {progress.percent >= 0 && (
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full rounded-full bg-[#007bff] transition-all duration-300"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  </div>
+                )}
               </div>
             )}
 

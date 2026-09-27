@@ -14,6 +14,18 @@ body {
   background-color: var(--color-page);
 }
 
+/* 隐藏数字输入框的原生 spinner，与整体设计风格保持一致 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 8px;

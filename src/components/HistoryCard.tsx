@@ -18,25 +18,27 @@ function cleanText(text: string): string {
 
 export default function HistoryCard({ items, playingId, onPlay, onDownload, onClear }: HistoryCardProps) {
   return (
-    <div className="h-full overflow-hidden rounded-[15px] border-none shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_6px_25px_rgba(99,102,241,0.08)]">
+    <div className="flex h-full flex-col overflow-hidden rounded-[15px] border-none shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_6px_25px_rgba(99,102,241,0.08)]">
       <div className="relative overflow-hidden rounded-t-[15px] bg-gradient-to-r from-[#4a90e2] to-[#6bb5ff] px-4 py-6">
         <h2 className="relative m-0 text-center text-2xl font-medium text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.1)]">
           历史记录
         </h2>
       </div>
-      <div className="rounded-b-[15px] bg-gradient-to-b from-white to-[#e6f0f8] p-4">
+      <div className="flex flex-1 flex-col rounded-b-[15px] bg-gradient-to-b from-white to-[#e6f0f8] p-4">
         <button
           type="button"
           onClick={onClear}
-          className="mb-3 w-full rounded-[10px] bg-gradient-to-r from-[#fbbf24] to-[#f59e0b] py-2 font-medium text-white transition-all hover:from-[#f59e0b] hover:to-[#d97706] active:scale-[0.98]"
+          className="mb-3 w-full shrink-0 rounded-[10px] bg-gradient-to-r from-[#fbbf24] to-[#f59e0b] py-2 font-medium text-white transition-all hover:from-[#f59e0b] hover:to-[#d97706] active:scale-[0.98]"
         >
           清除历史
         </button>
-        <div className="history-container max-h-[640px] overflow-y-auto p-0.5">
-          {items.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-faint">暂无历史记录</div>
-          ) : (
-            items.map((item) => (
+        {items.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center py-10 text-sm text-slate-faint">
+            暂无历史记录，生成语音后会显示在这里
+          </div>
+        ) : (
+          <div className="history-container max-h-[560px] min-h-0 flex-1 overflow-y-auto p-0.5">
+            {items.map((item) => (
               <div
                 key={item.id}
                 onClick={(e) => {
@@ -74,9 +76,9 @@ export default function HistoryCard({ items, playingId, onPlay, onDownload, onCl
                   <div className="mt-1 truncate text-xs text-slate-faint">{item.requestInfo}</div>
                 )}
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
