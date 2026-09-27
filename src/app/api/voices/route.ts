@@ -1,46 +1,51 @@
-export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-auth-token");
-  
-  // Handle OPTIONS request
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
-  }
-  
-  // Only allow GET requests
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-  
+import { errorResponse, jsonResponse, preflightResponse, CORS_HEADERS } from "@/lib/api";
+import type { NextRequest } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+interface VoiceItem {
+  ShortName: string;
+  LocalName: string;
+  Locale: string;
+  Gender: string;
+  WordsPerMinute?: number;
+  SampleRateHertz?: number;
+  [key: string]: unknown;
+}
+
+export async function OPTIONS() {
+  return preflightResponse();
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const { query } = req;
-    const localeFilter = (query.l || "").toLowerCase();
-    const format = query.f;
-    
+    const q = req.nextUrl.searchParams;
+    const localeFilter = (q.get("l") || "").toLowerCase();
+    const format = q.get("f");
+
     let voices = await voiceList();
     if (localeFilter) {
-      voices = voices.filter(item => item.Locale.toLowerCase().includes(localeFilter));
+      voices = voices.filter((item) => item.Locale.toLowerCase().includes(localeFilter));
     }
-    
+
     if (format === "0") {
-      const formattedVoices = voices.map(item => formatVoiceItem(item));
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      return res.send(formattedVoices.join("\n"));
+      // MultiTTS YAML speaker 格式
+      const formatted = voices.map(formatVoiceItem);
+      return new Response(formatted.join("\n"), {
+        headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS_HEADERS },
+      });
     } else if (format === "1") {
-      const voiceMap = Object.fromEntries(voices.map(item => [item.ShortName, item.LocalName]));
-      return res.json(voiceMap);
+      return jsonResponse(Object.fromEntries(voices.map((item) => [item.ShortName, item.LocalName])));
     } else {
-      return res.json(voices);
+      return jsonResponse(voices);
     }
   } catch (error) {
     console.error("API Error:", error);
-    return res.status(500).json({ error: error.message || "Failed to fetch voices" });
+    return errorResponse(error instanceof Error ? error.message : "Failed to fetch voices");
   }
 }
 
-function formatVoiceItem(item) {
+function formatVoiceItem(item: VoiceItem): string {
   return `
 - !!org.nobody.multitts.tts.speaker.Speaker
   avatar: ''
@@ -59,11 +64,11 @@ function formatVoiceItem(item) {
 
 // 语音列表缓存：避免每次请求都向上游拉取全量列表
 const VOICES_CACHE_TTL = 60 * 60 * 1000; // 1 小时
-let voicesCache = null;
+let voicesCache: VoiceItem[] | null = null;
 let voicesCacheTime = 0;
-let voicesCachePromise = null;
+let voicesCachePromise: Promise<VoiceItem[]> | null = null;
 
-async function voiceList() {
+async function voiceList(): Promise<VoiceItem[]> {
   const now = Date.now();
   if (voicesCache && now - voicesCacheTime < VOICES_CACHE_TTL) {
     return voicesCache;
@@ -76,20 +81,21 @@ async function voiceList() {
         "X-Ms-Useragent": "SpeechStudio/2021.05.001",
         "Content-Type": "application/json",
         "Origin": "https://azure.microsoft.com",
-        "Referer": "https://azure.microsoft.com"
+        "Referer": "https://azure.microsoft.com",
       };
 
       const response = await fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
-        headers: headers
+        headers,
       });
 
       if (!response.ok) {
         throw new Error(`获取语音列表失败，状态码 ${response.status}`);
       }
 
-      voicesCache = await response.json();
+      const data = (await response.json()) as VoiceItem[];
+      voicesCache = data;
       voicesCacheTime = Date.now();
-      return voicesCache;
+      return data;
     })().finally(() => {
       voicesCachePromise = null;
     });

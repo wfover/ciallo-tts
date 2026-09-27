@@ -2,7 +2,7 @@
 
 LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选择，可调节语速和语调，提供即时试听和下载功能。
 
-> 本项目曾用名 Ciallo TTS。
+> 本项目曾用名 Ciallo TTS。基于 [Next.js](https://nextjs.org)（App Router）+ TypeScript + Tailwind CSS 构建。
 
 ## 功能特点
 
@@ -10,10 +10,25 @@ LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选�
 - 🔊 实时预览和试听功能
 - ⚡ 支持长文本自动分段处理
 - 🎛️ 可调节语速和语调
+- 🔍 语音搜索下拉框（按名称或 ID 过滤）
 - 📱 响应式设计，支持移动端
 - 💾 支持音频下载
 - 📝 历史记录功能（最多保存50条）
 - 🔌 支持添加自定义OpenAI格式的TTS API
+
+## 本地开发
+
+要求 Node.js 20 或更高版本。
+
+```bash
+npm install
+npm run dev        # 开发模式，默认 http://localhost:3000
+```
+
+```bash
+npm run build      # 生产构建
+npm start          # 运行生产版本
+```
 
 ## API 说明
 
@@ -25,12 +40,12 @@ LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选�
   - 支持 GET/POST 方法
   - GET 示例: `/api/tts?t=你好世界&v=zh-CN-XiaoxiaoNeural&r=0&p=0`
   - POST 示例: 请求体为JSON格式 `{"text": "你好世界", "voice": "zh-CN-XiaoxiaoNeural", "rate": 0, "pitch": 0}`
+  - `format` 参数可指定音频格式（默认 `audio-24khz-48kbitrate-mono-mp3`）
 
 - `/api/voices` - 获取可用语音列表 API
   - 仅支持 GET 方法
   - 示例: `/api/voices?l=zh&f=1` (l参数用于筛选语言，f参数指定返回格式)
-
-例如：`https://libretts.is-an.org/api/tts`
+  - `f=0`: MultiTTS YAML 格式；`f=1`: `{ShortName: LocalName}` 映射；缺省: 原始 JSON 数组
 
 ### 自定义 API
 
@@ -91,28 +106,13 @@ LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
 
 2. 登录 [Vercel](https://vercel.com/)，点击 "New Project"
 
-3. 导入你 fork 的仓库，并选择默认设置部署即可
+3. 导入你 fork 的仓库，Vercel 会自动识别 Next.js 项目并选择默认设置部署
 
 4. 部署完成后，你会获得一个 `your-project.vercel.app` 的域名
 
-### Cloudflare Pages 部署
-
-1. Fork 本仓库到你的 GitHub 账号
-
-2. 登录 Cloudflare Dashboard，进入 Pages 页面
-
-3. 创建新项目，选择从 Git 导入：
-   - 选择你 fork 的仓库
-   - 构建设置：
-     - 构建命令：留空
-     - 输出目录：`/`
-     - 环境变量：无需设置
-
-4. 部署完成后，你会获得一个 `xxx.pages.dev` 的域名
-
 ### 服务器部署（Docker）
 
-适合部署在自己的 VPS / 家用服务器上。项目服务端零依赖，镜像体积很小。
+适合部署在自己的 VPS / 家用服务器上：
 
 ```bash
 git clone https://github.com/LibreSpark/LibreTTS.git
@@ -135,19 +135,21 @@ docker run -d -p 3000:3000 -e PASSWORD=你的密码 --restart unless-stopped --n
 
 ### 服务器部署（Node.js）
 
-要求 Node.js 20 或更高版本，无需安装任何 npm 依赖：
+要求 Node.js 20 或更高版本：
 
 ```bash
 git clone https://github.com/LibreSpark/LibreTTS.git
 cd LibreTTS
+npm install
+npm run build
 
 # 可选：启用访问密码
 export PASSWORD=你的密码
 
-node server/server.js          # 或 npm start
+npm start
 ```
 
-可用环境变量：`PORT`（默认 3000）、`HOST`（默认 0.0.0.0）、`PASSWORD`（可选）。
+可用环境变量：`PORT`（默认 3000）、`HOSTNAME`（默认 0.0.0.0）、`PASSWORD`（可选）。
 
 如需开机自启，可配置 systemd 服务（`/etc/systemd/system/libretts.service`）：
 
@@ -159,7 +161,8 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/LibreTTS
 Environment=PASSWORD=你的密码
-ExecStart=/usr/bin/node server/server.js
+Environment=PORT=3000
+ExecStart=/usr/bin/npm start
 Restart=unless-stopped
 
 [Install]
@@ -189,6 +192,6 @@ server {
 
 ## 环境变量
 
-除了原有配置外，现在项目支持设置环境变量 PASSWORD 来开启访问密码验证。如果 PASSWORD 非空，则用户第一次访问页面时会显示密码输入界面，输入正确后在该设备上后续访问将不再需要验证。
+设置环境变量 `PASSWORD` 可开启访问密码验证。如果 `PASSWORD` 非空，则用户第一次访问页面时会显示密码输入界面，输入正确后在该设备上后续访问将不再需要验证。
 
 [![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
