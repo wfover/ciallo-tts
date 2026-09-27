@@ -94,6 +94,26 @@ test("generateSsml: 转义用户文本防注入", () => {
   assert.ok(ssml.includes('<voice name="zh-CN-XiaoxiaoNeural">'));
 });
 
+test("generateSsml: 保留合法停顿标签", () => {
+  const ssml = generateSsml('前半句<break time="1.5s"/>后半句', "zh-CN-XiaoxiaoNeural", 0, 0);
+  assert.ok(ssml.includes('前半句<break time="1.5s"/>后半句'), "合法停顿标签被破坏: " + ssml);
+});
+
+test("generateSsml: 非法停顿标签仍被转义（防注入）", () => {
+  // 伪造成合法样式的注入尝试应被整体转义，不会以原始标签形式出现在 SSML 中
+  const ssml = generateSsml('<break time="1s" onclick="x"/>', "zh-CN-XiaoxiaoNeural", 0, 0);
+  assert.ok(!ssml.includes('<break time="1s" onclick'), "注入标签未被转义");
+  assert.ok(ssml.includes('&lt;break'), "应被转义为实体");
+});
+
+test("generateSsml: ms 停顿标签与多个标签混合", () => {
+  const text = 'A<break time="500ms"/>B&C<break time="2s"/>';
+  const ssml = generateSsml(text, "v", 0, 0);
+  assert.ok(ssml.includes('<break time="500ms"/>'));
+  assert.ok(ssml.includes('<break time="2s"/>'));
+  assert.ok(ssml.includes('B&amp;C'), "& 应被转义: " + ssml);
+});
+
 // ---------- formatToExtension ----------
 test("formatToExtension: 常见格式映射", () => {
   assert.equal(formatToExtension("audio-24khz-48kbitrate-mono-mp3"), "mp3");

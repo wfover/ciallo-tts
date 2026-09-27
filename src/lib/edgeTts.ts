@@ -30,11 +30,27 @@ export function escapeXml(str: unknown): string {
   ));
 }
 
+// 严格校验的停顿标签：只放行 <break time="数字(s|ms)"/> 精确格式，防止借保护机制注入任意标签
+const BREAK_TAG_RE = /<break\s+time="\d+(?:\.\d+)?(?:ms|s)?"\s*\/>/g;
+
+/**
+ * 转义用户文本，但保留合法的 <break/> 停顿标签（作为原子单元跳过转义）。
+ * 客户端把含停顿的原始文本直接发到服务端，由这里统一转义并保留标签。
+ */
+function escapeXmlProtectBreaks(text: string): string {
+  const tags: string[] = [];
+  const masked = text.replace(BREAK_TAG_RE, (m) => {
+    tags.push(m);
+    return `\u0000${tags.length - 1}\u0000`;
+  });
+  return escapeXml(masked).replace(/\u0000(\d+)\u0000/g, (_, i: string) => tags[+i]);
+}
+
 export function generateSsml(text: string, voiceName: string, rate: number, pitch: number): string {
   return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN">
               <voice name="${escapeXml(voiceName)}">
                   <mstts:express-as style="general" styledegree="1.0" role="default">
-                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${escapeXml(text)}</prosody>
+                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${escapeXmlProtectBreaks(text)}</prosody>
                   </mstts:express-as>
               </voice>
           </speak>`;
