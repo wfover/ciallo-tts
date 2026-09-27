@@ -128,3 +128,40 @@ export function escapeXml(str: unknown): string {
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c] as string
   ));
 }
+
+const PREVIEW_TAG_RE = /<break\s+time=["']\d+(?:\.\d+)?[ms]s?["']\s*\/>/g;
+
+/**
+ * 取试听用的文本前缀：前 maxChars 个可见字符，但停顿标签必须保持完整——
+ * 若按字符数硬切会把标签截断，产生残缺 SSML（试听与生成效果不一致的根源）。
+ */
+export function getPreviewText(text: string, maxChars = 20): string {
+  const tags = [...text.matchAll(PREVIEW_TAG_RE)].map(
+    (m) => [m.index!, m.index! + m[0].length] as [number, number]
+  );
+  let chars = 0;
+  let cut = 0;
+  let i = 0;
+  while (i < text.length) {
+    const tag = tags.find(([s]) => s === i);
+    if (tag) {
+      i = tag[1]; // 整个标签原样保留
+      cut = i;
+      continue;
+    }
+    chars += 1;
+    i += 1;
+    cut = i;
+    if (chars >= maxChars) {
+      // 截断点若紧跟停顿标签，一并包含（连续标签也全部保留）后再停
+      let t = tags.find(([s]) => s === i);
+      while (t) {
+        i = t[1];
+        cut = i;
+        t = tags.find(([s]) => s === i);
+      }
+      break;
+    }
+  }
+  return text.slice(0, cut);
+}

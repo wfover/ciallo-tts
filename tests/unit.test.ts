@@ -1,7 +1,7 @@
 // 纯函数单元测试：node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getApiLimits, getTextLength, splitText, escapeXml } from "../src/lib/segmentation.ts";
+import { getApiLimits, getPreviewText, getTextLength, splitText, escapeXml } from "../src/lib/segmentation.ts";
 import { formatToExtension, escapeXml as serverEscapeXml, generateSsml } from "../src/lib/edgeTts.ts";
 
 // ---------- getTextLength ----------
@@ -141,4 +141,29 @@ test("splitText: 1000字长文本分段后内容完整", () => {
   const segments = splitText(text, 5000);
   assert.equal(segments.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
   segments.forEach((s) => assert.ok(getTextLength(s) <= 5000));
+});
+
+// ---------- getPreviewText ----------
+test("getPreviewText: 无标签时取前20字符", () => {
+  const text = "一二三四五六七八九十一二三四五六七八九十" + "多余的";
+  assert.equal(getPreviewText(text, 20), text.slice(0, 20));
+});
+
+test("getPreviewText: 标签在截断点内时保持完整", () => {
+  const text = '前半句，<break time="1.5s"/>后半句很长很长很长';
+  const p = getPreviewText(text, 20);
+  assert.ok(p.includes('<break time="1.5s"/>'), "标签被截断: " + p);
+  // 前半句，(4字符) + 完整标签 → 后半句补足到20字符
+  assert.equal(p, '前半句，<break time="1.5s"/>' + "后半句很长很长很长".slice(0, 16));
+});
+
+test("getPreviewText: 截断点正好落在标签中间时扩展到标签结束", () => {
+  const text = "一二三四五六七八九十<break time=\"1s\"/>尾巴";
+  const p = getPreviewText(text, 10);
+  assert.equal(p, "一二三四五六七八九十<break time=\"1s\"/>");
+});
+
+test("getPreviewText: 标签不计入字符数", () => {
+  const text = '<break time="2s"/>一二三四五';
+  assert.equal(getPreviewText(text, 5), '<break time="2s"/>一二三四五');
 });

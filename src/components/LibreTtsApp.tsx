@@ -8,7 +8,7 @@ import HistoryCard from "./HistoryCard";
 import ApiManagerModal from "./ApiManagerModal";
 import PasswordGate from "./PasswordGate";
 import { ToastProvider, useToast } from "./ToastProvider";
-import { getApiLimits, getTextLength, splitText } from "@/lib/segmentation";
+import { getApiLimits, getPreviewText, getTextLength, splitText } from "@/lib/segmentation";
 import { audioExtension, makeTtsRequest, type ApiContext } from "@/lib/ttsRequest";
 import {
   buildExport,
@@ -294,7 +294,7 @@ function LibreTtsAppInner() {
       try {
         if (isPreview) {
           // 试听前 20 个字
-          const previewText = rawText.substring(0, 20);
+          const previewText = getPreviewText(rawText, 20);
           const blob = await requestSegment(previewText, true);
           const url = URL.createObjectURL(blob);
           cachedAudio.current.set(url, blob);
