@@ -613,7 +613,7 @@ function LibreTtsAppInner() {
                     value={rate}
                     onChange={(e) => setRate(Number(e.target.value))}
                     className="slider w-full"
-                    style={{ backgroundSize: `${((rate + 100) / 200) * 100}% 100%` }}
+                    style={{ background: `linear-gradient(to right, #4a90e2 ${((rate + 100) / 200) * 100}%, #e2e8f0 ${((rate + 100) / 200) * 100}%)` }}
                   />
                 </div>
                 <div className="mt-4">
@@ -627,7 +627,7 @@ function LibreTtsAppInner() {
                     value={pitch}
                     onChange={(e) => setPitch(Number(e.target.value))}
                     className="slider w-full"
-                    style={{ backgroundSize: `${((pitch + 100) / 200) * 100}% 100%` }}
+                    style={{ background: `linear-gradient(to right, #4a90e2 ${((pitch + 100) / 200) * 100}%, #e2e8f0 ${((pitch + 100) / 200) * 100}%)` }}
                   />
                 </div>
               </>
