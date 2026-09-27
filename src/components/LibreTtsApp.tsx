@@ -640,18 +640,23 @@ function LibreTtsAppInner() {
               生成语音
             </button>
 
-            {result && (
-              <div className="mt-4">
-                <audio ref={audioRef} controls autoPlay className="mt-2 w-full rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.05)]" src={result.url} />
-                <a
-                  href={result.url}
-                  download={result.filename}
-                  className="mt-3 block w-full rounded-[10px] bg-gradient-to-r from-[#5cb85c] to-[#4cae4c] py-2.5 text-center font-medium text-white transition-all hover:brightness-105 hover:-translate-y-px active:scale-[0.98]"
-                >
-                  下载语音文件
-                </a>
-              </div>
-            )}
+            {/* 播放器与下载按钮始终渲染，避免首次生成时布局高度跳变 */}
+            <div className="mt-4">
+              <audio ref={audioRef} controls autoPlay className="mt-2 w-full rounded-xl shadow-[0_2px_10px_rgba(0,0,0,0.05)]" src={result?.url} />
+              <a
+                href={result?.url}
+                download={result?.filename}
+                aria-disabled={!result}
+                onClick={(e) => { if (!result) e.preventDefault(); }}
+                className={`mt-3 block w-full rounded-[10px] py-2.5 text-center font-medium text-white transition-all ${
+                  result
+                    ? "bg-gradient-to-r from-[#5cb85c] to-[#4cae4c] hover:brightness-105 hover:-translate-y-px active:scale-[0.98]"
+                    : "cursor-not-allowed bg-slate-300"
+                }`}
+              >
+                下载语音文件
+              </a>
+            </div>
           </div>
         </div>
 
