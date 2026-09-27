@@ -8,8 +8,13 @@ import HistoryCard from "./HistoryCard";
 import ApiManagerModal from "./ApiManagerModal";
 import PasswordGate from "./PasswordGate";
 import { ToastProvider, useToast } from "./ToastProvider";
-import { getApiLimits, getPreviewText, getTextLength, splitText } from "@/lib/segmentation";
-import { audioExtension, makeTtsRequest, type ApiContext } from "@/lib/ttsRequest";
+import { getPreviewText, getTextLength, resolveApiLimits, splitText } from "@/lib/segmentation";
+import {
+  audioExtension,
+  makeTtsRequest,
+  supportedAudioFormats,
+  type ApiContext,
+} from "@/lib/ttsRequest";
 import {
   buildExport,
   exportFileName,
@@ -20,9 +25,9 @@ import {
   persistCustomApis,
   type CustomApiMap,
 } from "@/lib/customApis";
-import type { CustomApi, HistoryItem, SpeakerMap } from "@/lib/types";
+import type { ApiFormat, CustomApi, HistoryItem, SpeakerMap } from "@/lib/types";
 
-const BUILTIN_APIs: { id: string; label: string; endpoint: string; format: "openai" | "edge" }[] = [
+const BUILTIN_APIs: { id: string; label: string; endpoint: string; format: ApiFormat }[] = [
   { id: "edge-api", label: "Edge API", endpoint: "/api/tts", format: "edge" },
   {
     id: "oai-tts",
@@ -31,6 +36,25 @@ const BUILTIN_APIs: { id: string; label: string; endpoint: string; format: "open
     format: "openai",
   },
 ];
+
+const FORMAT_LABELS: Record<ApiFormat, string> = {
+  openai: "OpenAI格式",
+  edge: "Edge API格式",
+  template: "自定义请求模板",
+};
+
+/** 解析自定义 API 的额外请求参数（JSON 对象），非法时忽略 */
+function parseExtraParams(text?: string): Record<string, unknown> | undefined {
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const API_TIPS: Record<string, string> = {
   "edge-api": "Edge API 请求应该不限次数",
@@ -60,6 +84,9 @@ function LibreTtsAppInner() {
   const [pitch, setPitch] = useState(0);
   const [instructions, setInstructions] = useState("");
   const [audioFormat, setAudioFormat] = useState("mp3");
+  const [edgeStyle, setEdgeStyle] = useState("");
+  const [edgeRole, setEdgeRole] = useState("");
+  const [edgeVolume, setEdgeVolume] = useState(50);
   const [pauseSeconds, setPauseSeconds] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [playingId, setPlayingId] = useState<number | null>(null);
@@ -82,6 +109,9 @@ function LibreTtsAppInner() {
         isCustom: true,
         apiKey: custom.apiKey,
         maxLength: custom.maxLength,
+        model: custom.model,
+        extraParams: parseExtraParams(custom.extraParams),
+        template: custom.template,
       } satisfies ApiContext;
     }
     const builtin = BUILTIN_APIs.find((a) => a.id === apiId);
@@ -95,7 +125,10 @@ function LibreTtsAppInner() {
   }, [apiId, customApis]);
 
   const apiFormat = currentApi?.format ?? "edge";
-  const limits = getApiLimits(apiFormat);
+  const limits = useMemo(
+    () => resolveApiLimits(apiFormat, currentApi?.maxLength),
+    [apiFormat, currentApi?.maxLength]
+  );
 
   // 初始加载：内置讲述人 + localStorage 自定义 API
   useEffect(() => {
@@ -174,9 +207,22 @@ function LibreTtsAppInner() {
 
   const apiTips = currentApi
     ? currentApi.isCustom
-      ? `自定义API: ${customApis[apiId]?.name} - 使用${currentApi.format === "openai" ? "OpenAI格式" : "Edge API格式"}`
+      ? `自定义API: ${customApis[apiId]?.name} - 使用${FORMAT_LABELS[currentApi.format]}`
       : API_TIPS[apiId] || ""
     : "";
+
+  const audioFormatOptions: SelectOption[] = useMemo(
+    () => supportedAudioFormats(apiFormat).map((f) => ({ value: f, label: f.toUpperCase() })),
+    [apiFormat]
+  );
+
+  // 切换 API 后若当前音频格式不受支持，则回退到首个可用格式
+  useEffect(() => {
+    const supported = supportedAudioFormats(apiFormat);
+    if (!supported.includes(audioFormat)) {
+      setAudioFormat(supported[0]);
+    }
+  }, [apiFormat, audioFormat]);
 
   const charCount = useMemo(() => {
     const used = getTextLength(text);
@@ -288,6 +334,9 @@ function LibreTtsAppInner() {
           preview: segmentPreview,
           instructions: instructions.trim(),
           audioFormat,
+          style: edgeStyle.trim() || undefined,
+          role: edgeRole.trim() || undefined,
+          volume: edgeVolume,
         });
       }
 
@@ -380,7 +429,22 @@ function LibreTtsAppInner() {
         hideProgress();
       }
     },
-    [currentApi, text, speakerId, speakerState, rate, pitch, instructions, audioFormat, limits.maxSegment, show, addHistoryItem]
+    [
+      currentApi,
+      text,
+      speakerId,
+      speakerState,
+      rate,
+      pitch,
+      instructions,
+      audioFormat,
+      edgeStyle,
+      edgeRole,
+      edgeVolume,
+      limits.maxSegment,
+      show,
+      addHistoryItem,
+    ]
   );
 
   // ---------- 插入停顿 ----------
@@ -558,35 +622,34 @@ function LibreTtsAppInner() {
               <p className="mt-1 text-xs text-slate-muted">{charCount}</p>
             </div>
 
-            {apiFormat === "openai" && (
-              <>
-                <div className="mt-4">
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">语音指令（可选）：</label>
-                  <input
-                    type="text"
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
-                    placeholder="如：请用欢快和兴奋的语气说话"
-                    className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
-                  />
-                  <p className="mt-1 text-xs text-slate-muted">可用于指导语音情感、语气或风格</p>
-                </div>
-
-                <div className="mt-4">
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">音频格式：</label>
-                  <SearchableSelect
-                    options={["mp3", "opus", "aac", "flac", "wav", "pcm"].map((f) => ({
-                      value: f,
-                      label: f.toUpperCase(),
-                    }))}
-                    value={audioFormat}
-                    onChange={setAudioFormat}
-                    searchPlaceholder="搜索格式..."
-                    unit="种格式"
-                  />
-                </div>
-              </>
+            {(apiFormat === "openai" || apiFormat === "template") && (
+              <div className="mt-4">
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">语音指令（可选）：</label>
+                <input
+                  type="text"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="如：请用欢快和兴奋的语气说话"
+                  className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                />
+                <p className="mt-1 text-xs text-slate-muted">
+                  {apiFormat === "template"
+                    ? "模板中可用 {{instructions}} 引用该内容"
+                    : "可用于指导语音情感、语气或风格"}
+                </p>
+              </div>
             )}
+
+            <div className="mt-4">
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">音频格式：</label>
+              <SearchableSelect
+                options={audioFormatOptions}
+                value={audioFormat}
+                onChange={setAudioFormat}
+                searchPlaceholder="搜索格式..."
+                unit="种格式"
+              />
+            </div>
 
             {apiFormat === "edge" && (
               <>
@@ -616,6 +679,46 @@ function LibreTtsAppInner() {
                     onChange={(e) => setPitch(Number(e.target.value))}
                     className="slider w-full"
                     style={{ background: `linear-gradient(to right, #4a90e2 ${((pitch + 100) / 200) * 100}%, #e2e8f0 ${((pitch + 100) / 200) * 100}%)` }}
+                  />
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Style <span className="text-slate-faint">(留空为 general)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={edgeStyle}
+                      onChange={(e) => setEdgeStyle(e.target.value)}
+                      placeholder="general / cheerful"
+                      className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Role <span className="text-slate-faint">(留空为 default)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={edgeRole}
+                      onChange={(e) => setEdgeRole(e.target.value)}
+                      placeholder="default"
+                      className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    音量: <span className="font-normal">{edgeVolume}</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={edgeVolume}
+                    onChange={(e) => setEdgeVolume(Number(e.target.value))}
+                    className="slider w-full"
+                    style={{ background: `linear-gradient(to right, #4a90e2 ${edgeVolume}%, #e2e8f0 ${edgeVolume}%)` }}
                   />
                 </div>
               </>

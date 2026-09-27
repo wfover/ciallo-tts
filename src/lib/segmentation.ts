@@ -1,14 +1,34 @@
 // 文本长度计算与分段算法（自 script.js 移植为纯函数）
+import type { ApiFormat } from "./types";
 
 export interface ApiLimits {
+  /** 单次请求允许的最大单位数 */
   maxSegment: number;
+  /** 整段文本允许的最大单位数（超出则拒绝/截断） */
   maxTotal: number;
 }
 
-export function getApiLimits(format: "openai" | "edge"): ApiLimits {
-  return format === "openai"
-    ? { maxSegment: 400, maxTotal: 2000 }
-    : { maxSegment: 5000, maxTotal: 100000 };
+const FORMAT_LIMITS: Record<ApiFormat, ApiLimits> = {
+  openai: { maxSegment: 400, maxTotal: 2000 },
+  edge: { maxSegment: 5000, maxTotal: 100000 },
+  template: { maxSegment: 5000, maxTotal: 100000 },
+};
+
+export function getApiLimits(format: ApiFormat): ApiLimits {
+  return FORMAT_LIMITS[format] ?? FORMAT_LIMITS.edge;
+}
+
+/**
+ * 结合自定义 API 的 maxLength（单次请求上限）解析出实际生效的限制。
+ * 设置后 maxTotal 取 maxSegment 的 5 倍，允许自动分段落长文本。
+ * 前端计数器与请求校验共用此函数，保证两处阈值一致。
+ */
+export function resolveApiLimits(format: ApiFormat, maxLength?: number | null): ApiLimits {
+  const base = getApiLimits(format);
+  if (maxLength && maxLength > 0) {
+    return { maxSegment: maxLength, maxTotal: maxLength * 5 };
+  }
+  return base;
 }
 
 /** 计算文本等效长度：中文 2 单位 / 英文 1 单位 / 停顿 1 秒 = 11 单位 */

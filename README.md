@@ -14,7 +14,7 @@ LibreTTS 是一款免费的在线文本转语音工具，支持多种声音选�
 - 📱 响应式设计，支持移动端
 - 💾 支持音频下载
 - 📝 历史记录功能（最多保存50条）
-- 🔌 支持添加自定义 TTS API（OpenAI / Edge 两种格式，可导入导出配置）
+- 🔌 支持添加自定义 TTS API（OpenAI / Edge / 通用请求模板三种格式，内置常见服务预设，可导入导出配置）
 - 🔐 可选访问密码保护（设置 `PASSWORD` 环境变量）
 
 ## 本地开发
@@ -58,6 +58,9 @@ npm start          # 运行生产版本
   - GET 示例: `/api/tts?t=你好世界&v=zh-CN-XiaoxiaoNeural&r=0&p=0`
   - POST 示例: 请求体为JSON格式 `{"text": "你好世界", "voice": "zh-CN-XiaoxiaoNeural", "rate": 0, "pitch": 0}`
   - `format` 参数可指定音频格式（默认 `audio-24khz-48kbitrate-mono-mp3`）
+    - 兼容 UI 简写：`mp3` / `opus` / `wav` / `pcm`，也接受完整的 Microsoft 输出格式字符串
+  - `style` / `role` / `volume` 可选参数，映射到 SSML 的 `mstts:express-as` 与 `prosody`
+    - 示例: `{"text":"你好","voice":"zh-CN-XiaoxiaoNeural","style":"cheerful","role":"default","volume":80}`
 
 - `/api/voices` - 获取可用语音列表 API
   - 仅支持 GET 方法
@@ -66,11 +69,11 @@ npm start          # 运行生产版本
 
 ### 自定义 API
 
-LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
+LibreTTS 支持添加自定义 API 端点，目前支持三种格式：
 
 #### OpenAI 格式 API
 
-- 支持与 OpenAI TTS API 兼容的服务，如 OpenAI、LMStudio、LocalAI 等
+- 支持与 OpenAI TTS API 兼容的服务，如 OpenAI、Azure OpenAI、硅基流动、One-API 网关等
 - 请求格式: POST
   ```json
   {
@@ -80,7 +83,8 @@ LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
     "response_format": "mp3"
   }
   ```
-- 可选参数：`instructions` - 语音风格指导
+- 可选参数：`instructions` - 语音风格指导；`额外请求参数`（JSON）会合并进请求体，用于 `speed`、`sample_rate` 等扩展字段
+- 填写 **模型名 model** 后：`model` 使用该值、所选讲述人作为 `voice`；留空则兼容旧行为（讲述人当 model、voice 固定 `alloy`）
 
 #### Edge 格式 API
 
@@ -91,21 +95,43 @@ LibreTTS 支持添加自定义 API 端点，目前支持两种格式：
     "text": "您好，这是一段测试文本",
     "voice": "zh-CN-XiaoxiaoNeural",
     "rate": 0,
-    "pitch": 0
+    "pitch": 0,
+    "format": "mp3",
+    "style": "general",
+    "role": "default",
+    "volume": 50
   }
   ```
+
+#### 自定义请求模板
+
+用于对接任意 HTTP TTS 服务（ElevenLabs、Google、MiniMax、Fish Audio、火山引擎、GPT-SoVITS 等），可配置：
+
+- **请求方法**：POST / GET；**端点**与**请求头**支持占位符
+- **请求体模板**：`json`（占位符按 JSON 转义）或 `raw`（原样发送，如 Azure Speech 的 SSML）
+- **GET 查询串**：`text={{text}}&voice={{voice}}`
+- **响应解析**：直接音频 / 从 JSON 字段取值（支持 `base64` / `hex` / `url` 三种编码）
+
+可用占位符：
+`{{text}}` `{{textXml}}`（XML 已转义）`{{voice}}` `{{model}}` `{{rate}}` `{{pitch}}` `{{format}}` `{{instructions}}` `{{apiKey}}` `{{preview}}`
+
+#### 常见服务预设
+
+“管理自定义API”弹窗顶部提供一键预设，已内置 OpenAI、硅基流动、One-API 网关、ElevenLabs、MiniMax、Fish Audio、Google Cloud TTS、Azure 官方 Speech、火山引擎豆包语音、GPT-SoVITS。预设只是预填模板，载入后补全 API 密钥、区域等参数即可。
 
 #### 如何添加自定义 API
 
 1. 点击界面上的"管理API"按钮
-2. 填写以下信息：
-   - API 名称：自定义名称
-   - API 端点：语音生成服务地址
-   - API 密钥：可选，用于授权
-   - 模型列表端点：可选，用于获取可用模型
-   - API 格式：选择 OpenAI 或 Edge 格式
-   - 手动输入讲述人列表：逗号分隔的讲述人列表
-   - 最大文本长度：可选，限制单次请求的文本长度
+2. 可直接选择"常见服务预设"快速填充，或手动填写以下信息：
+  - API 名称：自定义名称
+  - API 格式：OpenAI / Edge / 自定义请求模板
+  - API 端点：语音生成服务地址
+  - API 密钥：可选，用于授权
+  - 模型名 model：OpenAI / 模板格式可用
+  - 额外请求参数：可选 JSON 对象，合并进请求体
+  - 模型列表端点：可选，用于获取可用模型
+  - 手动输入讲述人列表：逗号分隔的讲述人列表
+  - 最大文本长度：可选，限制单次请求的文本长度（前端计数与请求校验共用同一阈值）
 
 3. 点击"获取模型"按钮可自动填充可用讲述人列表
 4. 点击"保存"完成添加

@@ -8,6 +8,8 @@ import { Check, ChevronDown, Search, XCircle } from "lucide-react";
 export interface SelectOption {
   value: string;
   label: string;
+  /** 选项副标题（设置后无需开启 showSub 也会显示） */
+  sub?: string;
 }
 
 interface SearchableSelectProps {
@@ -153,7 +155,9 @@ export default function SearchableSelect({
       </button>
 
       <div
-        className={`absolute top-[calc(100%+6px)] left-0 right-0 z-1050 rounded-xl border border-primary/15 bg-white opacity-0 shadow-[0_10px_30px_rgba(15,40,80,0.18)] transition-all duration-200 pointer-events-none -translate-y-1.5 ${open ? "translate-y-0 opacity-100 pointer-events-auto" : ""}`}
+        className={`absolute top-[calc(100%+6px)] left-0 right-0 z-1050 rounded-xl border border-primary/15 bg-white shadow-[0_10px_30px_rgba(15,40,80,0.18)] transition-all duration-200 ${
+          open ? "translate-y-0 opacity-100 pointer-events-auto" : "pointer-events-none -translate-y-1.5 opacity-0"
+        }`}
       >
         <div className="flex items-center gap-2 border-b border-primary/10 px-3 py-2.5">
           <Search size={14} className="shrink-0 text-slate-faint" />
@@ -224,11 +228,11 @@ export default function SearchableSelect({
                       </span>
                       {isSelected && <Check size={13} className="shrink-0 text-white" />}
                     </div>
-                    {showSub && o.value !== o.label && (
+                    {(o.sub || (showSub && o.value !== o.label)) && (
                       <span
                         className={`block truncate text-xs ${isSelected ? "text-white/85" : "text-slate-faint"}`}
                       >
-                        {highlight(o.value, keyword.trim())}
+                        {highlight(o.sub ?? o.value, keyword.trim())}
                       </span>
                     )}
                   </div>

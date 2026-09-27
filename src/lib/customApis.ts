@@ -1,5 +1,5 @@
 // 自定义 API 的 localStorage 读写、导入导出与模型获取（自 script.js 移植）
-import type { CustomApi, SpeakerMap } from "./types";
+import type { ApiFormat, CustomApi, SpeakerMap } from "./types";
 
 const STORAGE_KEY = "customAPIs";
 
@@ -23,7 +23,32 @@ export function newCustomApiId(): string {
   return `custom-${Date.now()}`;
 }
 
-/** 获取自定义 API 的讲述人列表（OpenAI /models 格式） */
+/** 从各种常见模型列表响应中提取 (id, 显示名) 列表 */
+function extractModelEntries(data: unknown): Array<{ id: string; label?: string }> {
+  let arr: unknown[] = [];
+  if (Array.isArray(data)) {
+    arr = data;
+  } else if (data && typeof data === "object") {
+    const obj = data as { data?: unknown; models?: unknown; voices?: unknown };
+    if (Array.isArray(obj.data)) arr = obj.data;
+    else if (Array.isArray(obj.models)) arr = obj.models;
+    else if (Array.isArray(obj.voices)) arr = obj.voices;
+  }
+  return arr
+    .map((item) => {
+      if (typeof item === "string") return { id: item };
+      if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        const id = o.id ?? o.ShortName ?? o.name ?? o.model ?? o.voice;
+        const label = o.name ?? o.LocalName ?? o.display_name ?? o.label;
+        return id ? { id: String(id), label: label ? String(label) : undefined } : null;
+      }
+      return null;
+    })
+    .filter((v): v is { id: string; label?: string } => Boolean(v));
+}
+
+/** 获取自定义 API 的讲述人列表（兼容 OpenAI /models、Edge voices 等常见响应） */
 export async function fetchCustomSpeakers(api: CustomApi): Promise<SpeakerMap> {
   if (!api.modelEndpoint) {
     return { default: "默认讲述者" };
@@ -40,30 +65,30 @@ export async function fetchCustomSpeakers(api: CustomApi): Promise<SpeakerMap> {
   }
 
   const data = await response.json();
-  if (data.data && Array.isArray(data.data)) {
-    const ttsModels = data.data.filter(
-      (model: { id: string }) =>
-        model.id.startsWith("tts-") ||
-        ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(model.id)
-    );
-    if (ttsModels.length === 0) {
-      return { default: "未找到TTS模型" };
-    }
-    const speakerMap: SpeakerMap = {};
-    ttsModels.forEach((model: { id: string }) => {
-      speakerMap[model.id] = model.id;
-    });
-    return speakerMap;
+  const entries = extractModelEntries(data);
+  // 优先只保留 TTS 相关模型：OpenAI /models 会混入大量对话模型
+  const ttsOnly = entries.filter(
+    (m) =>
+      m.id.startsWith("tts-") ||
+      ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(m.id)
+  );
+  const picked = ttsOnly.length > 0 ? ttsOnly : entries;
+  if (picked.length === 0) {
+    console.warn("API返回格式不是标准模型列表:", data);
+    return { default: "未找到模型" };
   }
-  console.warn("API返回格式不是标准OpenAI格式:", data);
-  return { default: "自定义讲述人" };
+  const speakerMap: SpeakerMap = {};
+  picked.forEach((m) => {
+    speakerMap[m.id] = m.label || m.id;
+  });
+  return speakerMap;
 }
 
-/** 拉取模型列表，返回逗号拼接的讲述人字符串（弹窗“获取模型”按钮用） */
+/** 拉取模型列表（弹窗“获取模型”按钮用） */
 export async function fetchModelList(api: {
   modelEndpoint?: string;
   apiKey?: string;
-  format: "openai" | "edge";
+  format: ApiFormat;
 }): Promise<string[]> {
   if (!api.modelEndpoint) {
     throw new Error("请先填写模型列表端点");
@@ -77,17 +102,11 @@ export async function fetchModelList(api: {
     throw new Error(`获取模型失败: ${response.status}`);
   }
   const data = await response.json();
-
-  if (api.format === "openai" && data.data && Array.isArray(data.data)) {
-    return data.data.map((m: { id?: string; name?: string }) => m.id || m.name).filter(Boolean);
+  const ids = extractModelEntries(data).map((m) => m.id);
+  if (ids.length === 0) {
+    throw new Error("无法识别的模型列表格式");
   }
-  // edge 格式：数组项 m.ShortName || m.name
-  if (Array.isArray(data)) {
-    return data
-      .map((m: { ShortName?: string; name?: string; id?: string }) => m.ShortName || m.name || m.id)
-      .filter((v): v is string => Boolean(v));
-  }
-  throw new Error("无法识别的模型列表格式");
+  return ids;
 }
 
 export interface ExportFile {

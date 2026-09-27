@@ -2,10 +2,11 @@
 
 // 自定义 API 管理弹窗：新增/编辑/复制/删除/批量删除、获取模型、导入导出
 import { useEffect, useRef, useState } from "react";
-import { Copy, FileDown, FileUp, LoaderCircle, Pencil, Trash2, X } from "lucide-react";
-import type { CustomApi } from "@/lib/types";
+import { Copy, FileDown, FileUp, LoaderCircle, Pencil, Sparkles, Trash2, X } from "lucide-react";
+import type { ApiFormat, CustomApi, TemplateConfig } from "@/lib/types";
 import { fetchModelList } from "@/lib/customApis";
 import type { CustomApiMap } from "@/lib/customApis";
+import { API_PRESETS, type ApiPreset } from "@/lib/apiPresets";
 import SearchableSelect from "./SearchableSelect";
 import { useToast } from "./ToastProvider";
 
@@ -22,13 +23,24 @@ interface ApiManagerModalProps {
 
 interface FormState {
   name: string;
-  format: "openai" | "edge";
+  format: ApiFormat;
   endpoint: string;
   apiKey: string;
   modelEndpoint: string;
   manualSpeakers: string;
   maxLength: string;
   enableSegmentation: boolean;
+  model: string;
+  extraParams: string;
+  // 通用模板字段
+  templateMethod: "POST" | "GET";
+  templateHeaders: string;
+  templateQuery: string;
+  templateBody: string;
+  templateBodyType: "json" | "raw";
+  templateResponseType: "audio" | "json";
+  templateResponsePath: string;
+  templateResponseEncoding: "base64" | "hex" | "url";
 }
 
 const EMPTY_FORM: FormState = {
@@ -40,7 +52,65 @@ const EMPTY_FORM: FormState = {
   manualSpeakers: "",
   maxLength: "",
   enableSegmentation: true,
+  model: "",
+  extraParams: "",
+  templateMethod: "POST",
+  templateHeaders: "",
+  templateQuery: "",
+  templateBody: "",
+  templateBodyType: "json",
+  templateResponseType: "audio",
+  templateResponsePath: "",
+  templateResponseEncoding: "base64",
 };
+
+const FORMAT_LABELS: Record<ApiFormat, string> = {
+  openai: "OpenAI 格式",
+  edge: "Edge API 格式",
+  template: "自定义请求模板",
+};
+
+/** 校验并规范化「额外请求参数」JSON 对象 */
+function parseJsonObject(text: string, label: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (err) {
+    throw new Error(`${label} 不是合法 JSON: ${(err as Error).message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return JSON.stringify(parsed);
+}
+
+/** 预设 → 表单 */
+function presetToForm(preset: ApiPreset): FormState {
+  const api = preset.api;
+  const t: TemplateConfig = api.template ?? {};
+  return {
+    ...EMPTY_FORM,
+    name: api.name,
+    format: api.format,
+    endpoint: api.endpoint,
+    modelEndpoint: api.modelEndpoint ?? "",
+    manualSpeakers: (api.manual ?? []).join(","),
+    maxLength: api.maxLength ? String(api.maxLength) : "",
+    enableSegmentation: api.enableSegmentation !== false,
+    model: api.model ?? "",
+    extraParams: api.extraParams ?? "",
+    templateMethod: t.method ?? "POST",
+    templateHeaders: t.headers ?? "",
+    templateQuery: t.query ?? "",
+    templateBody: t.body ?? "",
+    templateBodyType: t.bodyType ?? "json",
+    templateResponseType: t.responseType ?? "audio",
+    templateResponsePath: t.responsePath ?? "",
+    templateResponseEncoding: t.responseEncoding ?? "base64",
+  };
+}
 
 export default function ApiManagerModal({
   open,
@@ -75,9 +145,18 @@ export default function ApiManagerModal({
   if (!open) return null;
 
   const isOpenAi = form.format === "openai";
+  const isTemplate = form.format === "template";
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function applyPreset(presetId: string) {
+    const preset = API_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    setEditingId(null);
+    setForm(presetToForm(preset));
+    show(`已载入预设：${preset.name}`, "success");
   }
 
   function submitForm(e: React.FormEvent) {
@@ -86,6 +165,17 @@ export default function ApiManagerModal({
       show("请填写API名称和端点URL", "warning");
       return;
     }
+    let extraParams: string | undefined;
+    try {
+      extraParams = parseJsonObject(form.extraParams, "额外请求参数");
+      if (form.format === "template" && form.templateBodyType === "json" && form.templateBody.trim()) {
+        JSON.parse(form.templateBody);
+      }
+    } catch (err) {
+      show(err instanceof Error ? err.message : "JSON 解析失败", "danger");
+      return;
+    }
+
     const manual = form.manualSpeakers
       .split(",")
       .map((s) => s.trim())
@@ -100,7 +190,22 @@ export default function ApiManagerModal({
       manual: manual.length ? manual : undefined,
       maxLength: form.maxLength ? parseInt(form.maxLength) : null,
       enableSegmentation: form.enableSegmentation,
+      model: form.model.trim() || undefined,
+      extraParams,
     };
+    if (form.format === "template") {
+      api.template = {
+        method: form.templateMethod,
+        headers: form.templateHeaders.trim() || undefined,
+        query: form.templateQuery.trim() || undefined,
+        body: form.templateBody.trim() || undefined,
+        bodyType: form.templateBodyType,
+        responseType: form.templateResponseType,
+        responsePath: form.templateResponseType === "json" ? form.templateResponsePath.trim() : undefined,
+        responseEncoding:
+          form.templateResponseType === "json" ? form.templateResponseEncoding : undefined,
+      };
+    }
     onSaveApi(api);
     show(editingId ? `已更新API: ${api.name}` : `已保存API: ${api.name}`, "success");
     setForm(EMPTY_FORM);
@@ -108,6 +213,7 @@ export default function ApiManagerModal({
   }
 
   function editApi(api: CustomApi) {
+    const t = api.template ?? {};
     setEditingId(api.id);
     setForm({
       name: api.name,
@@ -118,6 +224,16 @@ export default function ApiManagerModal({
       manualSpeakers: (api.manual || []).join(","),
       maxLength: api.maxLength ? String(api.maxLength) : "",
       enableSegmentation: api.enableSegmentation !== false,
+      model: api.model || "",
+      extraParams: api.extraParams || "",
+      templateMethod: t.method ?? "POST",
+      templateHeaders: t.headers ?? "",
+      templateQuery: t.query ?? "",
+      templateBody: t.body ?? "",
+      templateBodyType: t.bodyType ?? "json",
+      templateResponseType: t.responseType ?? "audio",
+      templateResponsePath: t.responsePath ?? "",
+      templateResponseEncoding: t.responseEncoding ?? "base64",
     });
   }
 
@@ -181,9 +297,28 @@ export default function ApiManagerModal({
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto px-6 py-4">
+        <div className="px-6 py-4">
           <div className="mb-4 rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-700">
-            您可以添加自定义的TTS API。支持两种格式：OpenAI格式和Edge API格式。
+            您可以添加自定义的TTS API。支持三种格式：OpenAI格式、Edge API格式，以及可对接任意服务的
+            <span className="font-medium">自定义请求模板</span>。
+          </div>
+
+          <div className="mb-4 rounded-lg border border-primary/15 bg-white px-4 py-3">
+            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+              <Sparkles size={14} className="text-primary" />
+              从常见服务预设快速添加
+            </label>
+            <SearchableSelect
+              options={API_PRESETS.map((p) => ({ value: p.id, label: p.name, sub: p.description }))}
+              value=""
+              onChange={applyPreset}
+              searchPlaceholder="搜索服务（OpenAI / ElevenLabs / 火山引擎...）"
+              unit="个预设"
+              placeholder="选择预设后自动填充下方表单"
+            />
+            <p className="mt-1 text-xs text-slate-muted">
+              预设只是预填模板，载入后请补全 API 密钥、区域等参数再保存。
+            </p>
           </div>
 
           <form onSubmit={submitForm} className="space-y-4">
@@ -205,11 +340,12 @@ export default function ApiManagerModal({
               <label className="mb-1 block text-sm font-medium text-slate-700">API格式</label>
               <SearchableSelect
                 options={[
-                  { value: "openai", label: "OpenAI 格式" },
-                  { value: "edge", label: "Edge API 格式" },
+                  { value: "openai", label: "OpenAI 格式", sub: "标准 /v1/audio/speech 请求体" },
+                  { value: "edge", label: "Edge API 格式", sub: "内置 /api/tts 的请求契约" },
+                  { value: "template", label: "自定义请求模板", sub: "自定义 method / headers / body / 响应解析" },
                 ]}
                 value={form.format}
-                onChange={(v) => update("format", v as "openai" | "edge")}
+                onChange={(v) => update("format", v as ApiFormat)}
                 searchPlaceholder="搜索格式..."
                 unit="种格式"
               />
@@ -224,10 +360,21 @@ export default function ApiManagerModal({
                 type="url"
                 value={form.endpoint}
                 onChange={(e) => update("endpoint", e.target.value)}
-                placeholder={isOpenAi ? "https://api.openai.com/v1/audio/speech" : "https://your-api.example.com/tts"}
+                placeholder={
+                  isOpenAi
+                    ? "https://api.openai.com/v1/audio/speech"
+                    : isTemplate
+                      ? "https://api.example.com/tts/{{voice}}"
+                      : "https://your-api.example.com/tts"
+                }
                 required
                 className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
               />
+              {isTemplate && (
+                <p className="mt-1 text-xs text-slate-muted">
+                  端点支持占位符：{"{{voice}} {{model}} {{apiKey}} {{text}} {{format}}"}
+                </p>
+              )}
             </div>
 
             <div>
@@ -242,7 +389,8 @@ export default function ApiManagerModal({
                 className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
               />
               <p className="mt-1 text-xs text-slate-muted">
-                对于OpenAI格式，使用Bearer Token；对于Edge API格式，可以使用&quot;x-api-key: 值&quot;或Bearer Token
+                OpenAI / 模板格式默认使用 Bearer Token（模板中可用 {"{{apiKey}}"} 自定义到请求头）；Edge API
+                格式还可使用&quot;x-api-key: 值&quot;
               </p>
             </div>
 
@@ -268,6 +416,40 @@ export default function ApiManagerModal({
                   获取模型
                 </button>
               </div>
+            </div>
+
+            {(isOpenAi || isTemplate) && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  模型名 model <span className="font-normal text-slate-faint">(可选)</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.model}
+                  onChange={(e) => update("model", e.target.value)}
+                  placeholder={isOpenAi ? "如 tts-1 / gpt-4o-mini-tts" : "如 eleven_multilingual_v2"}
+                  className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                />
+                <p className="mt-1 text-xs text-slate-muted">
+                  OpenAI 格式：填写后 model 用此值、所选讲述人作为 voice；留空则兼容旧行为（讲述人当模型）。
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                额外请求参数 <span className="font-normal text-slate-faint">(JSON 对象，可选)</span>
+              </label>
+              <textarea
+                value={form.extraParams}
+                onChange={(e) => update("extraParams", e.target.value)}
+                rows={2}
+                placeholder={'{"speed":1.0,"language_boost":"auto"}'}
+                className="w-full rounded-[10px] border border-primary/15 px-3 py-2 font-mono text-xs outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+              />
+              <p className="mt-1 text-xs text-slate-muted">
+                会合并进请求体（覆盖同名参数），用于 speed / sample_rate / language_boost 等扩展字段。
+              </p>
             </div>
 
             <div>
@@ -313,6 +495,133 @@ export default function ApiManagerModal({
               </label>
               <p className="mt-1 text-xs text-slate-muted">关闭后，超长文本将被截断而不是分段</p>
             </div>
+
+            {isTemplate && (
+              <div className="space-y-4 rounded-lg border border-primary/15 bg-slate-50/60 p-4">
+                <div className="text-sm font-medium text-slate-700">请求模板配置</div>
+                <p className="-mt-2 text-xs text-slate-muted">
+                  可用占位符：{"{{text}} {{textXml}} {{voice}} {{model}} {{rate}} {{pitch}} {{format}} {{instructions}} {{apiKey}} {{preview}}"}
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">请求方法</label>
+                    <SearchableSelect
+                      options={[
+                        { value: "POST", label: "POST" },
+                        { value: "GET", label: "GET" },
+                      ]}
+                      value={form.templateMethod}
+                      onChange={(v) => update("templateMethod", v as "POST" | "GET")}
+                      searchPlaceholder="搜索方法..."
+                      unit="种方法"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">响应类型</label>
+                    <SearchableSelect
+                      options={[
+                        { value: "audio", label: "音频直出" },
+                        { value: "json", label: "JSON 内取字段" },
+                      ]}
+                      value={form.templateResponseType}
+                      onChange={(v) => update("templateResponseType", v as "audio" | "json")}
+                      searchPlaceholder="搜索响应类型..."
+                      unit="种类型"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">
+                    请求头 <span className="text-slate-faint">(每行 Key: Value)</span>
+                  </label>
+                  <textarea
+                    value={form.templateHeaders}
+                    onChange={(e) => update("templateHeaders", e.target.value)}
+                    rows={3}
+                    placeholder={"xi-api-key: {{apiKey}}\nContent-Type: application/json"}
+                    className="w-full rounded-[10px] border border-primary/15 px-3 py-2 font-mono text-xs outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                  />
+                </div>
+
+                {form.templateMethod === "GET" ? (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      查询串 <span className="text-slate-faint">(占位符会自动 URL 编码)</span>
+                    </label>
+                    <textarea
+                      value={form.templateQuery}
+                      onChange={(e) => update("templateQuery", e.target.value)}
+                      rows={2}
+                      placeholder="text={{text}}&voice={{voice}}"
+                      className="w-full rounded-[10px] border border-primary/15 px-3 py-2 font-mono text-xs outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">请求体类型</label>
+                        <SearchableSelect
+                          options={[
+                            { value: "json", label: "JSON" },
+                            { value: "raw", label: "原样（SSML/XML 等）" },
+                          ]}
+                          value={form.templateBodyType}
+                          onChange={(v) => update("templateBodyType", v as "json" | "raw")}
+                          searchPlaceholder="搜索类型..."
+                          unit="种类型"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">请求体模板</label>
+                      <textarea
+                        value={form.templateBody}
+                        onChange={(e) => update("templateBody", e.target.value)}
+                        rows={4}
+                        placeholder={'{"text":"{{text}}","voice":"{{voice}}"}'}
+                        className="w-full rounded-[10px] border border-primary/15 px-3 py-2 font-mono text-xs outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {form.templateResponseType === "json" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        音频字段路径
+                      </label>
+                      <input
+                        type="text"
+                        value={form.templateResponsePath}
+                        onChange={(e) => update("templateResponsePath", e.target.value)}
+                        placeholder="data.audio"
+                        className="w-full rounded-[10px] border border-primary/15 px-3 py-2 font-mono text-xs outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">字段编码</label>
+                      <SearchableSelect
+                        options={[
+                          { value: "base64", label: "Base64" },
+                          { value: "hex", label: "Hex" },
+                          { value: "url", label: "音频地址 URL" },
+                        ]}
+                        value={form.templateResponseEncoding}
+                        onChange={(v) =>
+                          update("templateResponseEncoding", v as "base64" | "hex" | "url")
+                        }
+                        searchPlaceholder="搜索编码..."
+                        unit="种编码"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="submit"
@@ -437,7 +746,7 @@ export default function ApiManagerModal({
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-800">{api.name}</div>
                       <div className="truncate text-xs text-slate-muted">
-                        {api.endpoint} · {api.format === "openai" ? "OpenAI格式" : "Edge API格式"}
+                        {api.endpoint} · {FORMAT_LABELS[api.format] ?? api.format}
                         {api.manual?.length ? ` · ${api.manual.length} 个讲述人` : ""}
                       </div>
                     </div>

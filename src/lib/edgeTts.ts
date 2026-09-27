@@ -7,6 +7,28 @@ let endpoint: { t: string; r: string } | null = null;
 let refreshPromise: Promise<void> | null = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
+/** 默认输出格式（24kHz 48kbps mp3） */
+export const DEFAULT_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3";
+
+/** UI 简写格式 → Microsoft 输出格式 */
+const UI_FORMAT_MAP: Record<string, string> = {
+  mp3: "audio-24khz-48kbitrate-mono-mp3",
+  opus: "webm-24khz-16bit-mono-opus",
+  ogg: "ogg-24khz-16bit-mono-opus",
+  wav: "riff-24khz-16bit-mono-pcm",
+  pcm: "raw-16khz-16bit-mono-pcm",
+};
+
+/**
+ * 把 UI 传入的简写格式（mp3/opus/wav/pcm）映射为 Microsoft 输出格式。
+ * 传入的已是完整格式（如 audio-24khz-48kbitrate-mono-mp3）时原样返回，保持向后兼容。
+ */
+export function normalizeOutputFormat(format?: string): string {
+  if (!format) return DEFAULT_OUTPUT_FORMAT;
+  const trimmed = format.trim();
+  return UI_FORMAT_MAP[trimmed.toLowerCase()] ?? trimmed;
+}
+
 /** 音频格式 → 文件扩展名 */
 export function formatToExtension(format: string): string {
   const f = format.toLowerCase();
@@ -46,11 +68,31 @@ function escapeXmlProtectBreaks(text: string): string {
   return escapeXml(masked).replace(/\u0000(\d+)\u0000/g, (_, i: string) => tags[+i]);
 }
 
-export function generateSsml(text: string, voiceName: string, rate: number, pitch: number): string {
+/** SSML 可调参数（均带安全默认值，保持向后兼容） */
+export interface SsmlOptions {
+  /** 表达风格，如 general / cheerful / sad（Microsoft style） */
+  style?: string;
+  /** 角色，如 default / YoungAdultFemale */
+  role?: string;
+  /** 音量 0-100，默认 50 */
+  volume?: number;
+}
+
+export function generateSsml(
+  text: string,
+  voiceName: string,
+  rate: number,
+  pitch: number,
+  opts: SsmlOptions = {}
+): string {
+  const style = (opts.style ?? "").trim() || "general";
+  const role = (opts.role ?? "").trim() || "default";
+  const volume =
+    typeof opts.volume === "number" && Number.isFinite(opts.volume) ? Math.round(opts.volume) : 50;
   return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN">
               <voice name="${escapeXml(voiceName)}">
-                  <mstts:express-as style="general" styledegree="1.0" role="default">
-                      <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${escapeXmlProtectBreaks(text)}</prosody>
+                  <mstts:express-as style="${escapeXml(style)}" styledegree="1.0" role="${escapeXml(role)}">
+                      <prosody rate="${rate}%" pitch="${pitch}%" volume="${volume}">${escapeXmlProtectBreaks(text)}</prosody>
                   </mstts:express-as>
               </voice>
           </speak>`;
@@ -165,11 +207,12 @@ export async function synthesize(
   voiceName: string,
   rate: number,
   pitch: number,
-  outputFormat: string
+  outputFormat: string,
+  opts: SsmlOptions = {}
 ): Promise<ArrayBuffer> {
   await refreshEndpoint();
 
-  const ssml = generateSsml(text, voiceName, rate, pitch);
+  const ssml = generateSsml(text, voiceName, rate, pitch, opts);
   const url = `https://${endpoint!.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
 
   const response = await fetch(url, {
