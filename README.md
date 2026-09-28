@@ -61,11 +61,18 @@ npm start          # 运行生产版本
     - 兼容 UI 简写：`mp3` / `opus` / `wav` / `pcm`，也接受完整的 Microsoft 输出格式字符串
   - `style` / `role` / `volume` 可选参数，映射到 SSML 的 `mstts:express-as` 与 `prosody`
     - 示例: `{"text":"你好","voice":"zh-CN-XiaoxiaoNeural","style":"cheerful","role":"default","volume":80}`
+    - 界面会根据所选语音从 `/api/voice-meta` 拉取可用值并中文展示（风格=语气，角色=年龄/性别音色）；切换语音会自动清除不支持的取值
 
 - `/api/voices` - 获取可用语音列表 API
   - 仅支持 GET 方法
   - 示例: `/api/voices?l=zh&f=1` (l参数用于筛选语言，f参数指定返回格式)
   - `f=0`: MultiTTS YAML 格式；`f=1`: `{ShortName: LocalName}` 映射；缺省: 原始 JSON 数组
+
+- `/api/voice-meta` - 查询单个语音可用的风格/角色
+  - 仅支持 GET 方法
+  - 示例: `/api/voice-meta?voice=zh-CN-XiaoxiaoNeural`
+  - 返回: `{"voice":"...","found":true,"styles":["cheerful",...],"roles":["Girl",...]}`
+  - `found=false` 表示未识别该讲述人（如自定义 API 的讲述人），前端回退为手动输入
 
 ### 自定义 API
 

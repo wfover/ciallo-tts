@@ -9,6 +9,7 @@ import ApiManagerModal from "./ApiManagerModal";
 import PasswordGate from "./PasswordGate";
 import { ToastProvider, useToast } from "./ToastProvider";
 import { getPreviewText, getTextLength, resolveApiLimits, splitText } from "@/lib/segmentation";
+import { mergeAudioBlobs } from "@/lib/audioBlob";
 import {
   audioExtension,
   makeTtsRequest,
@@ -26,6 +27,12 @@ import {
   type CustomApiMap,
 } from "@/lib/customApis";
 import type { ApiFormat, CustomApi, HistoryItem, SpeakerMap } from "@/lib/types";
+import {
+  DEFAULT_ROLE_LABEL,
+  DEFAULT_STYLE_LABEL,
+  roleLabel,
+  styleLabel,
+} from "@/lib/voiceStyles";
 
 const BUILTIN_APIs: { id: string; label: string; endpoint: string; format: ApiFormat }[] = [
   { id: "edge-api", label: "Edge API", endpoint: "/api/tts", format: "edge" },
@@ -42,6 +49,23 @@ const FORMAT_LABELS: Record<ApiFormat, string> = {
   edge: "Edge API格式",
   template: "自定义请求模板",
 };
+
+/** 音频格式显示名（PCM 会被自动封装为 WAV，这里说明清楚） */
+const AUDIO_FORMAT_LABELS: Record<string, string> = {
+  pcm: "PCM（自动封装为 WAV）",
+};
+
+/** 按 blob MIME 推断下载扩展名，避免一律 .mp3 */
+function extensionFromBlob(blob: Blob): string {
+  const type = blob.type.toLowerCase();
+  if (type.includes("wav")) return "wav";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("webm")) return "webm";
+  if (type.includes("flac")) return "flac";
+  if (type.includes("mp4") || type.includes("aac")) return "aac";
+  if (type.includes("pcm")) return "pcm";
+  return "mp3";
+}
 
 /** 解析自定义 API 的额外请求参数（JSON 对象），非法时忽略 */
 function parseExtraParams(text?: string): Record<string, unknown> | undefined {
@@ -87,6 +111,12 @@ function LibreTtsAppInner() {
   const [edgeStyle, setEdgeStyle] = useState("");
   const [edgeRole, setEdgeRole] = useState("");
   const [edgeVolume, setEdgeVolume] = useState(50);
+  // 当前语音支持的 style / role（来自 /api/voice-meta），unknown 表示未识别该讲述人
+  const [voiceMeta, setVoiceMeta] = useState<{ found: boolean; styles: string[]; roles: string[] } | null>(null);
+  const [voiceMetaLoading, setVoiceMetaLoading] = useState(false);
+  // 手动填写 style / role（识别不到语音或需要自定义值时使用）
+  const [styleManual, setStyleManual] = useState(false);
+  const [roleManual, setRoleManual] = useState(false);
   const [pauseSeconds, setPauseSeconds] = useState("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [playingId, setPlayingId] = useState<number | null>(null);
@@ -143,19 +173,23 @@ function LibreTtsAppInner() {
   }, [show]);
 
   // 讲述人选项派生：切换 API 或自定义 API 变化时重新加载
+  const prevApiIdRef = useRef(apiId);
   useEffect(() => {
     let cancelled = false;
+    const apiChanged = prevApiIdRef.current !== apiId;
+    prevApiIdRef.current = apiId;
     const custom = customApis[apiId];
 
     if (custom) {
       if (custom.manual && custom.manual.length) {
+        const manual = custom.manual;
         setSpeakerState({
           loading: false,
           error: null,
-          map: Object.fromEntries(custom.manual.map((v) => [v, v])),
+          map: Object.fromEntries(manual.map((v) => [v, v])),
           manual: true,
         });
-        setSpeakerId(custom.manual[0]);
+        setSpeakerId((cur) => (!apiChanged && manual.includes(cur) ? cur : manual[0]));
         return;
       }
       if (custom.apiKey && custom.modelEndpoint) {
@@ -165,7 +199,8 @@ function LibreTtsAppInner() {
             if (cancelled) return;
             setSpeakerState({ loading: false, error: null, map: speakers, manual: false });
             const first = Object.keys(speakers)[0];
-            setSpeakerId(first && first !== "default" && first !== "error" ? first : "");
+            const fallback = first && first !== "default" && first !== "error" ? first : "";
+            setSpeakerId((cur) => (!apiChanged && speakers[cur] ? cur : fallback));
           })
           .catch((err) => {
             if (cancelled) return;
@@ -184,8 +219,8 @@ function LibreTtsAppInner() {
 
     const speakers = builtinSpeakers[apiId]?.speakers ?? {};
     setSpeakerState({ loading: Object.keys(speakers).length === 0, error: null, map: speakers, manual: false });
-    const first = Object.keys(speakers)[0];
-    setSpeakerId(first || "");
+    const first = Object.keys(speakers)[0] || "";
+    setSpeakerId((cur) => (!apiChanged && speakers[cur] ? cur : first));
     return () => {
       cancelled = true;
     };
@@ -212,9 +247,94 @@ function LibreTtsAppInner() {
     : "";
 
   const audioFormatOptions: SelectOption[] = useMemo(
-    () => supportedAudioFormats(apiFormat).map((f) => ({ value: f, label: f.toUpperCase() })),
+    () =>
+      supportedAudioFormats(apiFormat).map((f) => ({
+        value: f,
+        label: AUDIO_FORMAT_LABELS[f] ?? f.toUpperCase(),
+      })),
     [apiFormat]
   );
+
+  // 内置 Edge 语音才查询可用 style / role；自定义 Edge API 的讲述人无法识别，回退手动输入
+  const voiceMetaEnabled = apiFormat === "edge" && !currentApi?.isCustom && !!speakerId;
+
+  useEffect(() => {
+    if (!voiceMetaEnabled) {
+      setVoiceMeta(null);
+      setVoiceMetaLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setVoiceMetaLoading(true);
+    fetch(`/api/voice-meta?voice=${encodeURIComponent(speakerId)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data: { found?: boolean; styles?: string[]; roles?: string[] }) => {
+        if (cancelled) return;
+        setVoiceMeta({
+          found: !!data.found,
+          styles: Array.isArray(data.styles) ? data.styles : [],
+          roles: Array.isArray(data.roles) ? data.roles : [],
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceMeta(null);
+      })
+      .finally(() => {
+        if (!cancelled) setVoiceMetaLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [voiceMetaEnabled, speakerId]);
+
+  // 换语音后丢弃该语音不支持的 style / role，避免合成失败
+  useEffect(() => {
+    if (!voiceMeta?.found || styleManual) return;
+    if (edgeStyle && !voiceMeta.styles.includes(edgeStyle)) setEdgeStyle("");
+  }, [voiceMeta, styleManual, edgeStyle]);
+
+  useEffect(() => {
+    if (!voiceMeta?.found || roleManual) return;
+    if (edgeRole && !voiceMeta.roles.includes(edgeRole)) setEdgeRole("");
+  }, [voiceMeta, roleManual, edgeRole]);
+
+  const styleOptions: SelectOption[] = useMemo(() => {
+    if (voiceMeta?.found) {
+      return [
+        { value: "", label: DEFAULT_STYLE_LABEL, sub: "general" },
+        ...voiceMeta.styles.map((s) => ({ value: s, label: styleLabel(s), sub: s })),
+      ];
+    }
+    // 未识别语音时至少保留当前值，避免下拉丢数据
+    const extra = edgeStyle ? [{ value: edgeStyle, label: styleLabel(edgeStyle), sub: edgeStyle }] : [];
+    return [{ value: "", label: DEFAULT_STYLE_LABEL, sub: "general" }, ...extra];
+  }, [voiceMeta, edgeStyle]);
+
+  const roleOptions: SelectOption[] = useMemo(() => {
+    if (voiceMeta?.found) {
+      return [
+        { value: "", label: DEFAULT_ROLE_LABEL, sub: "default" },
+        ...voiceMeta.roles.map((r) => ({ value: r, label: roleLabel(r), sub: r })),
+      ];
+    }
+    const extra = edgeRole ? [{ value: edgeRole, label: roleLabel(edgeRole), sub: edgeRole }] : [];
+    return [{ value: "", label: DEFAULT_ROLE_LABEL, sub: "default" }, ...extra];
+  }, [voiceMeta, edgeRole]);
+
+  // 控件形态：loading=读取中占位；select=下拉选择；none=该语音无可用值（禁用）；manual=手动输入
+  type VoiceMetaMode = "loading" | "select" | "none" | "manual";
+  function metaMode(
+    manual: boolean,
+    values: string[] | undefined,
+  ): VoiceMetaMode {
+    if (manual) return "manual";
+    if (voiceMetaLoading && !voiceMeta) return "loading";
+    if (!voiceMeta?.found) return "manual";
+    return values && values.length > 0 ? "select" : "none";
+  }
+
+  const styleMode = metaMode(styleManual, voiceMeta?.styles);
+  const roleMode = metaMode(roleManual, voiceMeta?.roles);
 
   // 切换 API 后若当前音频格式不受支持，则回退到首个可用格式
   useEffect(() => {
@@ -270,8 +390,8 @@ function LibreTtsAppInner() {
       return [];
     });
     setPlayingId(null);
-    alert("历史记录已清除！");
-  }, []);
+    show("历史记录已清除！", "success");
+  }, [show]);
 
   // ---------- 播放与下载 ----------
   const playAudio = useCallback(
@@ -409,14 +529,12 @@ function LibreTtsAppInner() {
           );
         }
 
-        // 多段时合并为一条历史记录
-        if (results.length > 1) {
-          const merged = new Blob(results, { type: "audio/mpeg" });
-          addHistoryItem(`${requestId}(合并)`, speakerName, rawText, merged, `共 ${segments.length} 段`);
-        }
-
+        // 多段时合并（WAV 需按 PCM 数据合并并重写头，直接拼容器会导致只播第一段）
         if (results.length > 0) {
-          const finalBlob = results.length > 1 ? new Blob(results, { type: "audio/mpeg" }) : results[0];
+          const finalBlob = await mergeAudioBlobs(results);
+          if (results.length > 1) {
+            addHistoryItem(`${requestId}(合并)`, speakerName, rawText, finalBlob, `共 ${segments.length} 段`);
+          }
           const url = URL.createObjectURL(finalBlob);
           cachedAudio.current.set(url, finalBlob);
           // 音频元素通过 result 状态渲染（src + autoPlay），无需直接操作 DOM
@@ -683,29 +801,129 @@ function LibreTtsAppInner() {
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">
-                      Style <span className="text-slate-faint">(留空为 general)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={edgeStyle}
-                      onChange={(e) => setEdgeStyle(e.target.value)}
-                      placeholder="general / cheerful"
-                      className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
-                    />
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-600">
+                        情绪风格 <span className="text-slate-faint">Style</span>
+                      </label>
+                      {voiceMeta?.found && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // 切回选择模式时丢弃列表外的值，避免带着无效值请求
+                            if (styleManual && voiceMeta?.found && edgeStyle && !voiceMeta.styles.includes(edgeStyle)) {
+                              setEdgeStyle("");
+                            }
+                            setStyleManual(!styleManual);
+                          }}
+                          className="text-[11px] text-primary transition-opacity hover:opacity-70"
+                        >
+                          {styleManual ? "选择" : "手动输入"}
+                        </button>
+                      )}
+                    </div>
+                    {styleMode === "select" ? (
+                      <SearchableSelect
+                        options={styleOptions}
+                        value={edgeStyle}
+                        onChange={setEdgeStyle}
+                        searchPlaceholder="搜索风格（中文或英文）..."
+                        unit="种风格"
+                        placeholder="默认（通用）"
+                      />
+                    ) : styleMode === "loading" ? (
+                      <SearchableSelect
+                        options={[]}
+                        value=""
+                        onChange={() => {}}
+                        emptyText="正在读取支持的风格..."
+                        disabled
+                      />
+                    ) : styleMode === "none" ? (
+                      <input
+                        type="text"
+                        value={DEFAULT_STYLE_LABEL}
+                        readOnly
+                        disabled
+                        title="该语音不支持情绪风格"
+                        className="w-full cursor-not-allowed rounded-[10px] border border-primary/15 px-3 py-2 text-sm text-slate-faint opacity-70"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={edgeStyle}
+                        onChange={(e) => setEdgeStyle(e.target.value)}
+                        placeholder="留空为 general，如 cheerful"
+                        className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                      />
+                    )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">
-                      Role <span className="text-slate-faint">(留空为 default)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={edgeRole}
-                      onChange={(e) => setEdgeRole(e.target.value)}
-                      placeholder="default"
-                      className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
-                    />
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-600">
+                        角色扮演 <span className="text-slate-faint">Role</span>
+                      </label>
+                      {voiceMeta?.found && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (roleManual && voiceMeta?.found && edgeRole && !voiceMeta.roles.includes(edgeRole)) {
+                              setEdgeRole("");
+                            }
+                            setRoleManual(!roleManual);
+                          }}
+                          className="text-[11px] text-primary transition-opacity hover:opacity-70"
+                        >
+                          {roleManual ? "选择" : "手动输入"}
+                        </button>
+                      )}
+                    </div>
+                    {roleMode === "select" ? (
+                      <SearchableSelect
+                        options={roleOptions}
+                        value={edgeRole}
+                        onChange={setEdgeRole}
+                        searchPlaceholder="搜索角色..."
+                        unit="个角色"
+                        placeholder="默认（原声）"
+                      />
+                    ) : roleMode === "loading" ? (
+                      <SearchableSelect
+                        options={[]}
+                        value=""
+                        onChange={() => {}}
+                        emptyText="正在读取支持的角色..."
+                        disabled
+                      />
+                    ) : roleMode === "none" ? (
+                      <input
+                        type="text"
+                        value={DEFAULT_ROLE_LABEL}
+                        readOnly
+                        disabled
+                        title="该语音不支持角色扮演"
+                        className="w-full cursor-not-allowed rounded-[10px] border border-primary/15 px-3 py-2 text-sm text-slate-faint opacity-70"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={edgeRole}
+                        onChange={(e) => setEdgeRole(e.target.value)}
+                        placeholder="留空为 default，如 Girl"
+                        className="w-full rounded-[10px] border border-primary/15 px-3 py-2 text-sm outline-none transition-all focus:border-primary-light focus:ring-[3px] focus:ring-primary-soft"
+                      />
+                    )}
                   </div>
+                  <p className="col-span-2 text-xs text-slate-muted">
+                    {voiceMetaLoading && !voiceMeta
+                      ? "正在读取该语音支持的风格..."
+                      : voiceMeta?.found
+                        ? `情绪风格决定说话的语气，角色扮演改变年龄/性别音色。该语音支持 ${voiceMeta.styles.length} 种风格、${voiceMeta.roles.length} 个角色；${
+                            styleManual || roleManual
+                              ? "当前为手动输入，换语音时不会自动清除，请自行确认取值。"
+                              : "切换语音会自动清除不支持的取值。"
+                          }`
+                        : "情绪风格决定说话的语气（如 cheerful 开心），角色扮演改变年龄/性别音色（如 Girl 女孩）。留空即使用语音默认表现，仅部分语音支持。"}
+                  </p>
                 </div>
                 <div className="mt-3">
                   <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -768,7 +986,7 @@ function LibreTtsAppInner() {
           items={history}
           playingId={playingId}
           onPlay={(item) => playAudio(item.blob, item.id)}
-          onDownload={(item) => downloadBlob(item.blob, `audio-${item.label}.mp3`)}
+          onDownload={(item) => downloadBlob(item.blob, `audio-${item.label}.${extensionFromBlob(item.blob)}`)}
           onClear={clearHistory}
         />
       </div>
