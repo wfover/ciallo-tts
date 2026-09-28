@@ -3,6 +3,7 @@
 //  - openai  ：/v1/audio/speech 风格请求体（标准 OpenAI、Azure OpenAI、硅基流动等）
 //  - edge    ：内置 /api/tts 的 { text, voice, rate, pitch, preview } 契约
 //  - template：通用请求模板，用户自定义 method / headers / body / 响应解析
+import { ensurePlayableAudio, PCM_SPEC_EDGE, PCM_SPEC_OPENAI } from "./audioBlob";
 import { getTextLength, resolveApiLimits } from "./segmentation";
 import {
   decodeAudioPayload,
@@ -100,6 +101,8 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
   const headers: Record<string, string> = {
     Accept: "audio/mpeg",
   };
+  // 裸 PCM 无容器头、浏览器无法播放，按来源推断规格后封装为 WAV
+  const pcmSpec = ctx.format === "edge" && !ctx.isCustom ? PCM_SPEC_EDGE : PCM_SPEC_OPENAI;
 
   // ---------- 通用请求模板 ----------
   if (ctx.format === "template") {
@@ -156,13 +159,21 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
       if (tpl.responseEncoding === "url") {
         const audioRes = await fetch(value);
         if (!audioRes.ok) await readError(audioRes);
-        return toAudioBlob(await audioRes.blob(), audioRes.headers.get("content-type"));
+        return ensurePlayableAudio(
+          toAudioBlob(await audioRes.blob(), audioRes.headers.get("content-type")),
+          opts.audioFormat,
+          pcmSpec
+        );
       }
       const bytes = decodeAudioPayload(value, tpl.responseEncoding === "hex" ? "hex" : "base64");
-      return new Blob([bytes], { type: "audio/mpeg" });
+      return ensurePlayableAudio(new Blob([bytes], { type: "audio/mpeg" }), opts.audioFormat, pcmSpec);
     }
 
-    return toAudioBlob(await response.blob(), response.headers.get("content-type"));
+    return ensurePlayableAudio(
+      toAudioBlob(await response.blob(), response.headers.get("content-type")),
+      opts.audioFormat,
+      pcmSpec
+    );
   }
 
   headers["Content-Type"] = "application/json";
@@ -231,11 +242,17 @@ export async function makeTtsRequest(ctx: ApiContext, opts: TtsRequestOptions): 
 
   if (!response.ok) await readError(response);
 
-  return toAudioBlob(await response.blob(), response.headers.get("content-type"));
+  return ensurePlayableAudio(
+    toAudioBlob(await response.blob(), response.headers.get("content-type")),
+    opts.audioFormat,
+    pcmSpec
+  );
 }
 
 /** 下载用的音频扩展名 */
 export function audioExtension(ctx: ApiContext, audioFormat: string): string {
+  // 裸 PCM 会被封装成 WAV，扩展名随之改为 .wav
+  if (audioFormat === "pcm") return "wav";
   if (ctx.format === "edge") {
     return EDGE_AUDIO_FORMATS.includes(audioFormat) ? audioFormat : "mp3";
   }
